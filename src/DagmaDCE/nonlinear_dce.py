@@ -9,27 +9,28 @@ import numpy as np
 from torch import optim
 import copy
 from tqdm.auto import tqdm
-from .locally_connected import LocallyConnected
+from locally_connected import LocallyConnected
 import abc
 import typing
+import math
 
 
-class Dagma_DCE_Module(nn.Module, abc.ABC):
-    @abc.abstractmethod
-    def get_graph(self, x: torch.Tensor) -> torch.Tensor:
-        ...
+# class Dagma_DCE_Module(nn.Module, abc.ABC):
+#     @abc.abstractmethod
+#     def get_graph(self, x: torch.Tensor) -> torch.Tensor:
+#         ...
 
-    @abc.abstractmethod
-    def h_func(self, W: torch.Tensor, s: float) -> torch.Tensor:
-        ...
+#     @abc.abstractmethod
+#     def h_func(self, W: torch.Tensor, s: float) -> torch.Tensor:
+#         ...
 
-    @abc.abstractmethod
-    def get_l1_reg(self, W: torch.Tensor) -> torch.Tensor:
-        ...
+#     @abc.abstractmethod
+#     def get_l1_reg(self, W: torch.Tensor) -> torch.Tensor:
+#         ...
 
 
 class DagmaDCE:
-    def __init__(self, model: Dagma_DCE_Module, use_mse_loss=True):
+    def __init__(self, model: nn.Module, use_mle_loss=True):
         """Initializes a DAGMA DCE model. Requires a `DAGMA_DCE_Module`
 
         Args:
@@ -39,18 +40,21 @@ class DagmaDCE:
                 Defaults to True.
         """
         self.model = model
-        self.loss = self.mse_loss if use_mse_loss else self.log_mse_loss
+        self.loss = self.mle_loss if use_mle_loss else self.mse_loss
 
     def mse_loss(self, output: torch.Tensor, target: torch.Tensor):
         """Computes the MSE loss sum (output - target)^2 / (2N)"""
         n, d = target.shape
         return 0.5 / n * torch.sum((output - target) ** 2)
 
-    def log_mse_loss(self, output: torch.Tensor, target: torch.Tensor):
-        """Computes the MSE loss d / 2 * log [sum (output - target)^2 / N ]"""
+    def mle_loss(self, output: torch.Tensor, target: torch.Tensor, Sigma: torch.Tensor):
+        """Computes the MLE loss 1/n*Tr((X-X_est)Sigma^{-1}(X-X_est)^T)"""
         n, d = target.shape
-        loss = 0.5 * d * torch.log(1 / n * torch.sum((output - target) ** 2))
-        return loss
+        tmp = torch.linalg.solve(Sigma, (target - output).T)
+        mle = torch.trace((target - output)@tmp)/n
+        sign, logdet = torch.linalg.slogdet(Sigma)
+        mle += logdet
+        return mle
 
     def minimize(
         self,
@@ -98,19 +102,21 @@ class DagmaDCE:
 
             if i == 0:
                 X_hat = self.model(self.X)
-                score = self.loss(X_hat, self.X)
+                Sigma = self.model.get_Sigma()
+                score = self.loss(X_hat, self.X, Sigma)
                 obj = score
 
             else:
                 W_current, observed_derivs = self.model.get_graph(self.X)
+                Sigma = self.model.get_Sigma()
 
-                h_val = self.model.h_func(W_current, s)
+                h_val = self.model.h_func(W_current, Sigma, s)
 
                 if h_val.item() < 0:
                     return False
 
                 X_hat = self.model(self.X)
-                score = self.mse_loss(X_hat, self.X)
+                score = self.mle_loss(X_hat, self.X)
 
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
 
@@ -200,9 +206,38 @@ class DagmaDCE:
                     mu *= mu_factor
 
         return self.model.get_graph(self.X)[0]
+    
+    
+def SPDLogCholesky(M: torch.tensor)-> torch.Tensor:
+    """
+    Use LogCholesky decomposition that map a matrix M to a SPD Sigma matrix.
+    """
+    # Take strictly lower triangular matrix
+    M_strict = M.tril(diagonal=-1)
+    # Make matrix with exponentiated diagonal
+    D = M.diag()
+    # Make the Cholesky decomposition matrix
+    L = M_strict + torch.diag(torch.exp(D))
+    # Invert the Cholesky decomposition
+    Sigma = torch.matmul(L, L.t()) #+ 1e-6 * torch.eye(d) # numerical stability
+    return Sigma
+
+def reverse_SPDLogCholesky(Sigma: torch.tensor)-> torch.Tensor:
+    """
+    Reverse the LogCholesky decomposition that map the SPD Sigma matrix to the matrix M.
+    """
+    # Compute the Cholesky decomposition
+    L = torch.linalg.cholesky(Sigma)
+    # Take strictly lower triangular matrix
+    M_strict = L.tril(diagonal=-1)
+    # Take the logarithm of the diagonal
+    D = torch.diag(torch.log(L.diag()))
+    # Return the log-Cholesky parametrization
+    M = M_strict + D
+    return M
 
 
-class DagmaMLP_DCE(Dagma_DCE_Module):
+class DagmaMLP_DCE(nn.Module):
     def __init__(
         self,
         dims: typing.List[int],
@@ -226,6 +261,10 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         self.dims, self.d = dims, dims[0]
         self.I = torch.eye(self.d)
 
+        Sigma = torch.eye(self.d, dtype=dtype)
+        self.M = reverse_SPDLogCholesky(Sigma)
+        self.M = nn.Parameter(self.M)
+
         self.fc1 = nn.Linear(self.d, self.d * dims[1], bias=bias)
 
         nn.init.zeros_(self.fc1.weight)
@@ -234,6 +273,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         layers = []
         for l in range(len(dims) - 2):
             layers.append(LocallyConnected(self.d, dims[l + 1], dims[l + 2], bias=bias))
+            # Each dimension d has a separate weight to learn
 
         self.fc2 = nn.ModuleList(layers)
 
@@ -246,17 +286,22 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         Returns:
             torch.Tensor: output
         """
-        x = self.fc1(x)
+        x = self.fc1(x) # [n, self.d * dims[1]]
 
-        x = x.view(-1, self.dims[0], self.dims[1])
+        x = x.view(-1, self.dims[0], self.dims[1]) # [n, d, self.dims[1]]
 
         for fc in self.fc2:
             x = torch.sigmoid(x)
-            x = fc(x)
+            x = fc(x) # [n, d, self.dims[2]]
 
-        x = x.squeeze(dim=2)
+        x = x.squeeze(dim=2) #[n, d]
 
         return x
+    
+    def get_Sigma(self)-> torch.Tensor:
+
+        Sigma = SPDLogCholesky(self.M)
+        return Sigma
 
     def get_graph(self, x: torch.Tensor) -> torch.Tensor:
         """Get the adjacency matrix defined by the DCE and the batched Jacobian
@@ -271,14 +316,14 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         observed_deriv = torch.func.vmap(torch.func.jacrev(self.forward))(x_dummy).view(
             -1, self.d, self.d
-        )
+        )#[n, d, d]
 
         # Adjacency matrix is RMS Jacobian
-        W = torch.sqrt(torch.mean(observed_deriv**2, axis=0).T)
+        W = torch.sqrt(torch.mean(observed_deriv**2, axis=0).T) #[d, d]
 
         return W, observed_deriv
 
-    def h_func(self, W: torch.Tensor, s: float = 1.0) -> torch.Tensor:
+    def cycle_loss(self, W1: torch.Tensor, s: float = 1.0) -> torch.Tensor:
         """Calculate the DAGMA constraint function
 
         Args:
@@ -289,9 +334,36 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         Returns:
             torch.Tensor: constraint
         """
-        h = -torch.slogdet(s * self.I - W * W)[1] + self.d * np.log(s)
+        cycle_loss = -torch.slogdet(s * self.I - W1 * W1)[1] + self.d * np.log(s)
 
-        return h
+        return cycle_loss
+    
+    def ancestrality_loss(self, W1: torch.tensor, W2: torch.tensor)-> torch.Tensor:
+        """
+        Compute the loss due to violations of ancestrality in the induced ADMG of W1, W2.
+
+        :param W1: numpy matrix for directed edge coefficients.
+        :param W2: numpy matrix for bidirected edge coefficients.
+        :return: float corresponding to penalty on violations of ancestrality.
+        """
+        d = len(W1)
+        W1_pos = W1*W1
+        W2_pos = W2*W2
+        W1k = torch.eye(d)
+        M = torch.eye(d)
+        for k in range(1, d):
+            W1k = W1k@W1_pos
+            # M += comb(d, k) * (1 ** k) * W1k (typical binoimial)
+            M += 1.0/math.factorial(k) * W1k #(special scaling)
+
+        return torch.sum(M*W2_pos)
+    
+    def h_func(self, W1: torch.tensor, W2: torch.tensor, s: float = 1.0) -> torch.Tensor:
+
+        cycle_loss= self.cycle_loss(W1, s)
+        ancestrality_loss = self.ancestrality_loss(W1, W2)
+        return cycle_loss+ancestrality_loss
+
 
     def get_l1_reg(self, observed_derivs: torch.Tensor) -> torch.Tensor:
         """Gets the L1 regularization
