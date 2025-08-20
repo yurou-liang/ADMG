@@ -376,7 +376,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         cycle_loss= self.cycle_loss(W1, s)
         ancestrality_loss = self.ancestrality_loss(W1, W2)
-        return cycle_loss#+ancestrality_loss
+        return cycle_loss+ancestrality_loss
 
 
     def get_l1_reg(self, observed_derivs: torch.Tensor) -> torch.Tensor:
