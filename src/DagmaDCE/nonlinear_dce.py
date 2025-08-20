@@ -15,22 +15,22 @@ import typing
 import math
 
 
-# class Dagma_DCE_Module(nn.Module, abc.ABC):
-#     @abc.abstractmethod
-#     def get_graph(self, x: torch.Tensor) -> torch.Tensor:
-#         ...
+class Dagma_DCE_Module(nn.Module, abc.ABC):
+    @abc.abstractmethod
+    def get_graph(self, x: torch.Tensor) -> torch.Tensor:
+        ...
 
-#     @abc.abstractmethod
-#     def h_func(self, W: torch.Tensor, s: float) -> torch.Tensor:
-#         ...
+    @abc.abstractmethod
+    def h_func(self, W1: torch.tensor, W2: torch.tensor, s: float) -> torch.Tensor:  
+        ...
 
-#     @abc.abstractmethod
-#     def get_l1_reg(self, W: torch.Tensor) -> torch.Tensor:
-#         ...
+    @abc.abstractmethod
+    def get_l1_reg(self, W: torch.Tensor) -> torch.Tensor:
+        ...
 
 
 class DagmaDCE:
-    def __init__(self, model: nn.Module, use_mle_loss=True):
+    def __init__(self, model: Dagma_DCE_Module, use_mle_loss=True):
         """Initializes a DAGMA DCE model. Requires a `DAGMA_DCE_Module`
 
         Args:
@@ -109,18 +109,27 @@ class DagmaDCE:
             else:
                 W_current, observed_derivs = self.model.get_graph(self.X)
                 Sigma = self.model.get_Sigma()
-
-                h_val = self.model.h_func(W_current, Sigma, s)
+                ##### new test
+                # Sigma = torch.eye(self.X.shape[1])
+                Wii = torch.diag(torch.diag(Sigma))
+                W2 = Sigma - Wii
+                h_val = self.model.h_func(W_current, W2, s)
 
                 if h_val.item() < 0:
                     return False
 
                 X_hat = self.model(self.X)
-                score = self.mle_loss(X_hat, self.X)
+                score = self.mle_loss(X_hat, self.X, Sigma)
 
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
 
                 obj = mu * (score + l1_reg) + h_val
+
+                if i % 100 == 0:
+                    print("Sigma: ", Sigma)
+                    print("obj: ", obj)
+                    print("mle loss: ", score)
+                    print("h_val: ", h_val)
 
             obj.backward()
             optimizer.step()
@@ -205,7 +214,12 @@ class DagmaDCE:
 
                     mu *= mu_factor
 
-        return self.model.get_graph(self.X)[0]
+            Sigma = self.model.get_Sigma()
+            Wii = torch.diag(torch.diag(Sigma))
+            W2 = Sigma - Wii
+            x_est = self.model(self.X)
+
+        return self.model.get_graph(self.X)[0], W2, x_est
     
     
 def SPDLogCholesky(M: torch.tensor)-> torch.Tensor:
@@ -237,7 +251,7 @@ def reverse_SPDLogCholesky(Sigma: torch.tensor)-> torch.Tensor:
     return M
 
 
-class DagmaMLP_DCE(nn.Module):
+class DagmaMLP_DCE(Dagma_DCE_Module):
     def __init__(
         self,
         dims: typing.List[int],
@@ -362,7 +376,7 @@ class DagmaMLP_DCE(nn.Module):
 
         cycle_loss= self.cycle_loss(W1, s)
         ancestrality_loss = self.ancestrality_loss(W1, W2)
-        return cycle_loss+ancestrality_loss
+        return cycle_loss#+ancestrality_loss
 
 
     def get_l1_reg(self, observed_derivs: torch.Tensor) -> torch.Tensor:
