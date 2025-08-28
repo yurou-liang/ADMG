@@ -49,6 +49,10 @@ class LocallyConnected(nn.Module):
             # You should always register all possible parameters, but the
             # optional ones can be None if you want.
             self.register_parameter("bias", None)
+        # Disable gradient updates
+        # self.weight.requires_grad = False
+        # if self.bias is not None:
+        #     self.bias.requires_grad = False
 
         self.reset_parameters()
 
