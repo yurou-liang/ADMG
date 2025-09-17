@@ -304,8 +304,11 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         x = x.view(-1, self.dims[0], self.dims[1]) # [n, d, self.dims[1]]
 
+        self.activation = nn.LeakyReLU()
+
         for fc in self.fc2:
-            x = torch.sigmoid(x)
+            # x = torch.sigmoid(x)
+            x = self.activation(x)
             x = fc(x) # [n, d, self.dims[2]]
 
         x = x.squeeze(dim=2) #[n, d]
@@ -330,12 +333,39 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         observed_deriv = torch.func.vmap(torch.func.jacrev(self.forward))(x_dummy).view(
             -1, self.d, self.d
-        )#[n, d, d]
+        )#[n, d, d], observed_deriv[i, j, k]=for ith sample, derivative of f_j wrt x_k
 
         # Adjacency matrix is RMS Jacobian
         W = torch.sqrt(torch.mean(observed_deriv**2, axis=0).T) #[d, d]
 
         return W, observed_deriv
+    
+    def get_Hessian(self, x: torch.Tensor) -> torch.Tensor:
+        """Get the adjacency matrix defined by the DCE and the batched Jacobian
+
+        Args:
+            x (torch.Tensor): input
+
+        Returns:
+            torch.Tensor, torch.Tensor: the weighted graph and batched Jacobian
+        """
+        x_dummy = x.detach().requires_grad_()
+
+        observed_deriv = torch.func.vmap(torch.func.jacrev(self.forward))(x_dummy).view(
+            -1, self.d, self.d
+        )#[n, d, d], observed_deriv[i, j, k]=for ith sample, derivative of f_j wrt x_k
+
+        z = (torch.randint_like(observed_deriv, 0, 2).float() * 2 - 1) # [n, d, d]
+
+        def g_single(xi, zi):
+            J = torch.func.jacrev(self.forward)(xi)   # [d,d]
+            return (J * zi).sum(dim=1) #[d]
+        
+        Hz  = torch.func.vmap(lambda xi, zi: torch.func.jacrev(lambda x_: g_single(x_, zi))(xi)
+        )(x_dummy, z).view(-1, self.d, self.d) #[n, d, d]
+        H_hat = (z*Hz).mean(dim=0) # [d, d] estimated Hessian of f_k wrt x_i, x_i
+
+        return observed_deriv, H_hat
 
     def cycle_loss(self, W1: torch.Tensor, s: float = 1.0) -> torch.Tensor:
         """Calculate the DAGMA constraint function
@@ -389,3 +419,69 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
             torch.Tensor: _description_
         """
         return torch.sum(torch.abs(torch.mean(observed_derivs, axis=0)))
+    
+
+################
+
+def hess_row_sumsq_vec(f, x, n_v=1, n_z=1, per_output_idx=None):
+    """
+    Estimate ∑_k || H^{(k)}_{i·} ||^2 for each input feature i.
+    f: (B,d)->(B,p) model
+    x: (B,d) with requires_grad=True
+    n_v: # of output-probes v (random if per_output_idx is None)
+    n_z: # of Hutchinson probes z per v
+    per_output_idx: optional list/1D tensor of output indices to target strictly
+    returns: curv_est (d,), sens_est (d,)   # curvature & sensitivity gates
+    """
+    B, d = x.shape
+    with torch.enable_grad():
+        curv_accum = torch.zeros(d, device=x.device)
+        sens_accum = torch.zeros(d, device=x.device)
+
+        # precompute f(x) once per v if you like; simplest is to recompute each loop
+        n_v_eff = len(per_output_idx) if per_output_idx is not None else n_v
+
+        for t in range(n_v_eff):
+            fx = f(x)                                  # (n,d)
+            p = fx.shape[1]
+
+            if per_output_idx is not None:
+                k = int(per_output_idx[t])
+                v = torch.zeros_like(fx) # (n,d)
+                v[:, k] = 1.0                          # strict: pick one output
+            else:
+                # random probe over outputs (Rademacher)
+                v = (torch.randint_like(fx, 0, 2).float() * 2 - 1)  # (n,d)
+
+            # Scalarize: y = <v, f(x)> averaged over batch, i.e., generate v per sample and do v^T f(x), then average over n
+            y = (fx * v).sum() / B
+
+            # First derivative wrt inputs
+            g = torch.autograd.grad(y, x, create_graph=True)[0]   # (n,d)
+
+            # Sensitivity gate E_v[(∂s_v/∂x_i)^2] ≈ ∑_k (∂f_k/∂x_i)^2
+            sens_accum += (g**2).mean(dim=0)
+
+            # Curvature via Hutchinson: Hz = ∇_x( g·z )
+            curv_this_v = torch.zeros(d, device=x.device)
+            for _ in range(n_z):
+                z = (torch.randint_like(x, 0, 2).float() * 2 - 1) # (n,d)
+                hz = torch.autograd.grad((g * z).sum(), x, create_graph=False)[0] # (d, d), hz[b,:] = (1/B)·(H_{s_{v_b}} z_b)
+                curv_this_v += (hz**2).mean(dim=0).detach() # (d, 1)
+
+            curv_accum += curv_this_v / n_z
+
+        curv_est = curv_accum / n_v_eff
+        sens_est = sens_accum / n_v_eff
+        return curv_est, sens_est
+
+
+def nonlin_regularizer_vec(f, x, m=1e-6, lam=1e-3, n_v=1, n_z=1, per_output_idx=None):
+    """
+    Option-A penalty for vector outputs:
+    penalize nonzero sensitivity with near-zero curvature along each input dim.
+    """
+    curv, sens = hess_row_sumsq_vec(f, x, n_v=n_v, n_z=n_z, per_output_idx=per_output_idx)
+    reg = (sens * torch.relu(m - curv)).sum()
+    return lam * reg
+
