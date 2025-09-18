@@ -108,6 +108,7 @@ class DagmaDCE:
 
             else:
                 W_current, observed_derivs = self.model.get_graph(self.X)
+                observed_derivs_mean = observed_derivs.mean(dim = 0)
                 observed_hess = self.model.exact_hessian_diag_avg(self.X)
                 Sigma = self.model.get_Sigma()
                 ##### new test
@@ -123,7 +124,7 @@ class DagmaDCE:
                 score = self.mle_loss(X_hat, self.X, Sigma)
 
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
-                nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs, observed_hess)
+                nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
 
                 obj = mu * (score + l1_reg + nonlinear_reg) + h_val
 
@@ -132,6 +133,9 @@ class DagmaDCE:
                     print("obj: ", obj)
                     print("mle loss: ", score)
                     print("h_val: ", h_val)
+                    print("nonlinear_reg: ", nonlinear_reg)
+                    print("observed_derivs: ", observed_derivs_mean)
+                    print("observed_hess: ", observed_hess)
 
             obj.backward()
             optimizer.step()
