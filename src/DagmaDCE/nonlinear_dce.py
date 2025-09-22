@@ -126,7 +126,7 @@ class DagmaDCE:
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
 
-                obj = mu * (score + l1_reg + nonlinear_reg) + h_val
+                obj = mu * (score + l1_reg + 10*nonlinear_reg) + h_val
 
                 if i % 100 == 0:
                     print("Sigma: ", Sigma)
@@ -310,7 +310,8 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         x = x.view(-1, self.dims[0], self.dims[1]) # [n, d, self.dims[1]]
 
-        self.activation = nn.LeakyReLU()
+        # self.activation = nn.SiLU()
+        self.activation = nn.Sigmoid()
 
         for fc in self.fc2:
             # x = torch.sigmoid(x)
@@ -381,7 +382,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
                 H = torch.func.vmap(hess_all_outputs_for_sample, in_dims=0)(xb)
                 # Take diagonal over last two dims -> [B, d, d]
                 Hdiag = torch.diagonal(H, dim1=-2, dim2=-1).contiguous()
-                out += Hdiag.sum(dim=0)  # accumulate sum over this minibatch
+                out += Hdiag.abs().sum(dim=0)  # accumulate sum over this minibatch
                 total += Hdiag.size(0)
 
         return out / total  # [d, d]
@@ -439,7 +440,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         """
         return torch.sum(torch.abs(torch.mean(observed_derivs, axis=0)))
     
-    def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-3):
+    def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-2):
         # constants on the right device/dtype
         m_t = torch.as_tensor(m, device=observed_hess.device, dtype=observed_hess.dtype)
 
