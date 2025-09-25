@@ -440,7 +440,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         """
         return torch.sum(torch.abs(torch.mean(observed_derivs, axis=0)))
     
-    def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-2):
+    def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-1):
         # constants on the right device/dtype
         m_t = torch.as_tensor(m, device=observed_hess.device, dtype=observed_hess.dtype)
 
