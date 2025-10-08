@@ -13,6 +13,7 @@ from locally_connected import LocallyConnected
 import abc
 import typing
 import math
+import torch.nn.functional as F
 
 
 class Dagma_DCE_Module(nn.Module, abc.ABC):
@@ -127,15 +128,19 @@ class DagmaDCE:
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
 
                 obj = mu * (score + l1_reg + 10*nonlinear_reg) + h_val
+                # obj = mu * (score + l1_reg) + h_val
 
-                if i % 100 == 0:
+                if i % 1000 == 0:
                     print("Sigma: ", Sigma)
+                    print("W2: ", W2)
                     print("obj: ", obj)
                     print("mle loss: ", score)
                     print("h_val: ", h_val)
                     print("nonlinear_reg: ", nonlinear_reg)
                     print("observed_derivs: ", observed_derivs_mean)
+                    # print("W_current.T: ", W_current.T)
                     print("observed_hess: ", observed_hess)
+                    print("mu: ", mu)
 
             obj.backward()
             optimizer.step()
@@ -239,7 +244,7 @@ def SPDLogCholesky(M: torch.tensor)-> torch.Tensor:
     # Make the Cholesky decomposition matrix
     L = M_strict + torch.diag(torch.exp(D))
     # Invert the Cholesky decomposition
-    Sigma = torch.matmul(L, L.t()) #+ 1e-6 * torch.eye(d) # numerical stability
+    Sigma = torch.matmul(L, L.t())
     return Sigma
 
 def reverse_SPDLogCholesky(Sigma: torch.tensor)-> torch.Tensor:
@@ -256,7 +261,17 @@ def reverse_SPDLogCholesky(Sigma: torch.tensor)-> torch.Tensor:
     M = M_strict + D
     return M
 
+class MaskedLinear(nn.Linear):
+    def __init__(self, in_features, out_features, mask, bias=True):
+        super().__init__(in_features, out_features, bias=bias)
+        self.register_buffer("mask", mask)
 
+        # Zero gradients for masked weights during backprop
+        self.weight.register_hook(lambda grad: grad * self.mask)
+
+    def forward(self, input):
+        return F.linear(input, self.weight * self.mask, self.bias)
+    
 class DagmaMLP_DCE(Dagma_DCE_Module):
     def __init__(
         self,
@@ -285,9 +300,22 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         self.M = reverse_SPDLogCholesky(Sigma)
         self.M = nn.Parameter(self.M)
 
-        self.fc1 = nn.Linear(self.d, self.d * dims[1], bias=bias)
+        self.fc1 = nn.Linear(self.d, self.d * dims[1], bias=bias) # [d * dims[1], d]
+        # self.fc1.weight.bounds = self._bounds()
+        self.mask = torch.ones(self.d * dims[1], self.d)
+
+        for j in range(self.d):
+            self.mask[j * dims[1]:(j + 1) * dims[1], j] = 0.0+1e-6
+
+        # self.fc1 = MaskedLinear(self.d, self.d * dims[1], mask, bias=bias)
+        # self.fc1 = nn.Linear(self.d, self.d * dims[1], bias=bias)
+
+        # with torch.no_grad():
+        #     self.fc1.weight *= mask
 
         nn.init.zeros_(self.fc1.weight)
+        # nn.init.xavier_uniform_(self.fc1.weight)
+        # self.fc1.weight.data *= self.fc1.mask   # enforce mask after init
         nn.init.zeros_(self.fc1.bias)
 
         layers = []
@@ -296,6 +324,19 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
             # Each dimension d has a separate weight to learn
 
         self.fc2 = nn.ModuleList(layers)
+
+    def _bounds(self):
+        d = self.dims[0]
+        bounds = []
+        for j in range(d):
+            for m in range(self.dims[1]):
+                for i in range(d):
+                    if i == j:
+                        bound = (0, 0)
+                    else:
+                        bound = (0, None)
+                    bounds.append(bound)
+        return bounds
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass of the sigmoidal feedforward NN
@@ -306,7 +347,11 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         Returns:
             torch.Tensor: output
         """
-        x = self.fc1(x) # [n, self.d * dims[1]]
+        # x = self.fc1(x) # [n, self.d * dims[1]]
+        weight = self.fc1.weight*self.mask #[d * dims[1], d]
+        x = x@(weight.T) 
+        if self.fc1.bias is not None:
+            x = x + self.fc1.bias.unsqueeze(0)
 
         x = x.view(-1, self.dims[0], self.dims[1]) # [n, d, self.dims[1]]
 
