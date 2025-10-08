@@ -126,7 +126,7 @@ class DagmaNonlinear:
     def fit(self, X, lambda1=.02, lambda2=.005,
             T=4, mu_init=.1, mu_factor=.1, s=1.0,
             warm_iter=5e4, max_iter=8e4, lr=.0002,
-            w_threshold=0.3, checkpoint=1000
+            w_threshold=0.0, checkpoint=1000
             ):
         torch.set_default_dtype(self.dtype)
         if type(X) == torch.Tensor:
@@ -166,8 +166,9 @@ class DagmaNonlinear:
                         s_cur = 1
                 mu *= mu_factor
         W_est = self.model.fc1_to_adj()
-        W_est[np.abs(W_est) < w_threshold] = 0
-        return W_est
+        X_est = self.model.forward(self.X)
+        # W_est[np.abs(W_est) < w_threshold] = 0
+        return W_est, X_est
 
 
 if __name__ == '__main__':
