@@ -50,6 +50,7 @@ class DagmaDCE:
     def mle_loss(self, output: torch.Tensor, target: torch.Tensor, Sigma: torch.Tensor):
         """Computes the MLE loss 1/n*Tr((X-X_est)Sigma^{-1}(X-X_est)^T)"""
         n, d = target.shape
+        Sigma = Sigma
         tmp = torch.linalg.solve(Sigma, (target - output).T)
         mle = torch.trace((target - output)@tmp)/n
         sign, logdet = torch.linalg.slogdet(Sigma)
@@ -145,19 +146,20 @@ class DagmaDCE:
                 obj = mu * (score + l1_reg + 10*nonlinear_reg) + h_val
                 # obj = mu * (score + l1_reg) + h_val
 
-                if i % 1000 == 0:
-                    print("Sigma: ", Sigma)
-                    print("W2: ", W2)
-                    print("obj: ", obj)
-                    print("mle loss: ", score)
-                    print("h_val: ", h_val)
-                    print("nonlinear_reg: ", nonlinear_reg)
-                    print("observed_derivs: ", observed_derivs_mean)
-                    # print("W_current.T: ", W_current.T)
-                    print("observed_hess: ", observed_hess)
-                    print("mu: ", mu)
+                # if i % 1000 == 0:
+                print("Sigma: ", Sigma)
+                print("W2: ", W2)
+                print("obj: ", obj)
+                print("mle loss: ", score)
+                print("h_val: ", h_val)
+                print("nonlinear_reg: ", nonlinear_reg)
+                print("observed_derivs: ", observed_derivs_mean)
+                # print("W_current.T: ", W_current.T)
+                print("observed_hess: ", observed_hess)
+                print("mu: ", mu)
 
             obj.backward()
+
             optimizer.step()
 
             if lr_decay and (i + 1) % 1000 == 0:
@@ -254,6 +256,7 @@ def SPDLogCholesky(M: torch.tensor)-> torch.Tensor:
     """
     # Take strictly lower triangular matrix
     M_strict = M.tril(diagonal=-1)
+    d,_ = M_strict.shape
     # Make matrix with exponentiated diagonal
     D = M.diag()
     # Make the Cholesky decomposition matrix
