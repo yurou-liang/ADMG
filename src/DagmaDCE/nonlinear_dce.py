@@ -56,6 +56,25 @@ class DagmaDCE:
         sign, logdet = torch.linalg.slogdet(Sigma)
         mle += logdet
         return mle
+    
+    def stable_mle_loss(self, output: torch.Tensor, target: torch.Tensor, Sigma: torch.Tensor, jitter: float = 1e-4):
+        E = target - output
+        n, d = E.shape
+        I = torch.eye(d, device=Sigma.device, dtype=Sigma.dtype)
+        Sigma_j = Sigma + jitter * I
+
+        try:
+            L = torch.linalg.cholesky(Sigma_j)
+        except RuntimeError:
+            # fallback: add more jitter dynamically
+            Sigma_j = Sigma_j + 1e-2 * I
+            L = torch.linalg.cholesky(Sigma_j)
+
+        tmp = torch.cholesky_solve(E.T, L)
+        quad = torch.sum(E.T * tmp) / n
+        logdet = 2 * torch.sum(torch.log(torch.diag(L)))
+        return quad + logdet
+
 
     def minimize(
         self,
@@ -138,7 +157,7 @@ class DagmaDCE:
                     return False
 
                 X_hat = self.model(self.X)
-                score = self.mle_loss(X_hat, self.X, Sigma)
+                score = self.loss(X_hat, self.X, Sigma)
 
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
@@ -146,21 +165,36 @@ class DagmaDCE:
                 obj = mu * (score + l1_reg + 10*nonlinear_reg) + h_val
                 # obj = mu * (score + l1_reg) + h_val
 
-                # if i % 1000 == 0:
-                print("Sigma: ", Sigma)
-                print("W2: ", W2)
-                print("obj: ", obj)
-                print("mle loss: ", score)
-                print("h_val: ", h_val)
-                print("nonlinear_reg: ", nonlinear_reg)
-                print("observed_derivs: ", observed_derivs_mean)
-                # print("W_current.T: ", W_current.T)
-                print("observed_hess: ", observed_hess)
-                print("mu: ", mu)
+                if i % 1000 == 0:
+                    print("Sigma: ", Sigma)
+                    print("W_current: ", W_current)
+                    print("W2: ", W2)
+                    print("obj: ", obj)
+                    print("mle loss: ", score)
+                    print("h_val: ", h_val)
+                    print("nonlinear_reg: ", nonlinear_reg)
+                    print("observed_derivs: ", observed_derivs_mean)
+                    # print("W_current.T: ", W_current.T)
+                    print("observed_hess: ", observed_hess)
+                    print("mu: ", mu)
 
             obj.backward()
-
+            # Clip gradients to avoid a big jump
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
             optimizer.step()
+
+            # Immediately check params
+            with torch.no_grad():
+                bad = False
+                for name, p in self.model.named_parameters():
+                    if p is None: 
+                        continue
+                    if torch.isnan(p).any() or torch.isinf(p).any():
+                        print(f"⚠️ NaN/Inf in parameter {name}")
+                        bad = True
+                if bad:
+                    return False  # trigger rollback / lr reduce
+            
 
             if lr_decay and (i + 1) % 1000 == 0:
                 scheduler.step()
@@ -399,6 +433,11 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         Returns:
             torch.Tensor, torch.Tensor: the weighted graph and batched Jacobian
         """
+        if torch.isnan(x).any():
+            print("NaN in input X before jacobian!")
+        y = self.forward(x)
+        if torch.isnan(y).any():
+            print("NaN in forward output!")
         x_dummy = x.detach().requires_grad_()
 
         observed_deriv = torch.func.vmap(torch.func.jacrev(self.forward))(x_dummy).view(
@@ -407,6 +446,9 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         # Adjacency matrix is RMS Jacobian
         W = torch.sqrt(torch.mean(observed_deriv**2, axis=0).T) #[d, d]
+
+        if torch.isnan(observed_deriv).any():
+            print("NaN in jacobian!")
 
         return W, observed_deriv
     
@@ -461,9 +503,15 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         Returns:
             torch.Tensor: constraint
         """
+        # A = s * self.I - W1 * W1
+        # print("A min diag:", A.diag().min().item())
+        # print("A max diag:", A.diag().max().item())
+        # print("||A||_F =", torch.linalg.norm(A).item())
+
         cycle_loss = -torch.slogdet(s * self.I - W1 * W1)[1] + self.d * np.log(s)
 
         return cycle_loss
+
     
     def ancestrality_loss(self, W1: torch.tensor, W2: torch.tensor)-> torch.Tensor:
         """
@@ -485,7 +533,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         return torch.sum(M*W2_pos)
     
-    def h_func(self, W1: torch.tensor, W2: torch.tensor, s: float = 1.0) -> torch.Tensor:
+    def h_func(self, W1: torch.tensor, W2: torch.tensor, s: float = 32.0) -> torch.Tensor:
 
         cycle_loss= self.cycle_loss(W1, s)
         ancestrality_loss = self.ancestrality_loss(W1, W2)
