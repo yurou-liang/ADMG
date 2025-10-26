@@ -365,8 +365,8 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         # with torch.no_grad():
         #     self.fc1.weight *= mask
 
-        nn.init.zeros_(self.fc1.weight)
-        # nn.init.xavier_uniform_(self.fc1.weight)
+        # nn.init.zeros_(self.fc1.weight)
+        nn.init.xavier_uniform_(self.fc1.weight)
         # self.fc1.weight.data *= self.fc1.mask   # enforce mask after init
         nn.init.zeros_(self.fc1.bias)
 
