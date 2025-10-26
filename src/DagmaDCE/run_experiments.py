@@ -2,6 +2,7 @@ import nonlinear_dce
 import nonlinear
 import torch
 import numpy as np
+import networkx as nx
 import pandas as pd
 import torch.nn as nn
 from locally_connected import LocallyConnected
@@ -67,7 +68,7 @@ def generate_layers(d, dims, admg, seed=None):
     for j in range(d):
         allowed_parents = admg[j]['parents']
         not_parents = [p for p in range(d) if p not in allowed_parents]
-        mask[j * dims[1]:(j + 1) * dims[1], not_parents] = 0.0
+        mask[j * dims[1]:(j + 1) * dims[1], not_parents] = 0.0 + 1e-6
 
     layers = []
     for l in range(len(dims) - 2):
@@ -162,7 +163,7 @@ def reverse_SPDLogCholesky(Sigma: torch.tensor)-> torch.Tensor:
     Reverse the LogCholesky decomposition that map the SPD Sigma matrix to the matrix M.
     """
     # Compute the Cholesky decomposition
-    Sigma = torch.tensor(Sigma)
+    # Sigma = torch.tensor(Sigma)
     L = torch.linalg.cholesky(Sigma)
     # Take strictly lower triangular matrix
     M_strict = L.tril(diagonal=-1)
@@ -171,6 +172,48 @@ def reverse_SPDLogCholesky(Sigma: torch.tensor)-> torch.Tensor:
     # Return the log-Cholesky parametrization
     M = M_strict + D
     return M
+
+def generate_from_epsilon(dims, epsilon, fc1, fc2, mask, parents):
+    """
+    Generate data x from epsilon according to x = f(x_parents) + epsilon.
+    
+    Args:
+        epsilon: [n, d] tensor of Gaussian noise
+        fc1, fc2, mask: network parameters
+        parents: dict {j: [parents_of_j]}
+    Returns:
+        x: [n, d] tensor of generated variables
+    """
+    n, d = epsilon.shape
+    X = torch.zeros_like(epsilon)
+
+    # Determine topological order (if not already given)
+    order = list(parents.keys())  # assume already topologically sorted
+
+    for j in order:
+        if len(parents[j]) == 0:
+            # root node: only noise
+            X[:, j] = epsilon[:, j]
+        else:
+            # prepare partial input with parents filled
+            x_partial = torch.zeros(n, d, dtype=epsilon.dtype)
+            for p in parents[j]:
+                x_partial[:, p] = X[:, p]
+
+            # compute all f_j(x) in parallel, then pick j-th column
+            f_out = forward(dims, fc1, fc2, mask, x_partial)  # [n, d]
+            X[:, j] = f_out[:, j] + epsilon[:, j]
+
+    return X
+
+def mle_loss(output: torch.Tensor, target: torch.Tensor, Sigma: torch.Tensor):
+        """Computes the MLE loss 1/n*Tr((X-X_est)Sigma^{-1}(X-X_est)^T)"""
+        n, d = target.shape
+        tmp = torch.linalg.solve(Sigma, (target - output).T)
+        mle = torch.trace((target - output)@tmp)/n
+        sign, logdet = torch.linalg.slogdet(Sigma)
+        mle += logdet
+        return mle
 
 
 if __name__ == "__main__":
@@ -188,24 +231,33 @@ if __name__ == "__main__":
     print(f'>>> Generating Data with MLP <<<')
 
     admg, A_dir, A_bidir = generate_ancestral_admg(args.d, p_dir=0.4, p_bidir=0.3, seed=args.s)
+    print("admg: ", admg)
+    parents = {j: admg[j]['parents'] for j in admg}
+    G = nx.DiGraph()
+    G.add_nodes_from(parents.keys())
+    for j, pa in parents.items():
+        G.add_edges_from((p, j) for p in pa)
+    order = list(nx.topological_sort(G))
+
     n_samples = 1000 
     dims=[args.d, 10, 1]
-    True_Sigma = generate_covariance(A_bidir, seed=args.s)
-    epsilon = np.random.multivariate_normal([0] * args.d, True_Sigma, size=n_samples)
+    Sigma_truth = generate_covariance(A_bidir, seed=args.s)
+    epsilon = np.random.multivariate_normal([0] * args.d, Sigma_truth, size=n_samples)
+    Sigma_truth = torch.tensor(Sigma_truth)
     epsilon = torch.tensor(epsilon)
     fc1, fc2, mask = generate_layers(args.d, dims, admg, seed = args.s)
     scale_weights(fc1, factor=10)
     for layer in fc2:
-        scale_weights(layer, factor=10)
-    X = forward(dims, fc1, fc2, mask, epsilon)
-    X_true = (X+epsilon).detach()
+        scale_weights(layer, factor=15)
+    X_truth = generate_from_epsilon(dims, epsilon, fc1, fc2, mask, parents).detach()
+    X = X_truth - epsilon
 
-    J = vmap(jacrev(f))(X_true)    # shape [n_samples, d, d]
-    W_true = torch.sqrt(torch.mean(J ** 2, axis=0).T)
-    print("W_true: ", W_true)
+    J = vmap(jacrev(f))(X_truth)    # shape [n_samples, d, d]
+    W_truth = torch.sqrt(torch.mean(J ** 2, axis=0).T)
+    
+    mle_loss_truth = mle_loss(X, X_truth, Sigma_truth)
 
-
-    M_truth = reverse_SPDLogCholesky(True_Sigma)
+    M_truth = reverse_SPDLogCholesky(Sigma_truth)
 
     # print(f'>>> DAGMA Init <<<')
 
@@ -269,27 +321,55 @@ if __name__ == "__main__":
     eq_model = nonlinear_dce.DagmaMLP_DCE(
         dims=[args.d, 10, 1], bias=True)
     model = nonlinear_dce.DagmaDCE(eq_model, use_mle_loss=True)
+    eq_model.mask = mask.clone()
     eq_model.fc1.weight = nn.Parameter(fc1_weight_truth)
     eq_model.fc1.bias = fc1_bias_truth
     eq_model.fc2[0].weight = fc2_weight_truth
     eq_model.fc2[0].bias = fc2_bias_truth
+
+    with torch.no_grad():
+        for j, pa in parents.items():
+            if len(pa) == 0:
+                start = j * dims[1]
+                end = (j + 1) * dims[1]
+                eq_model.fc1.bias[start:end] = 0.0 + 1e-6
+                eq_model.fc2[0].bias[j] = 0.0+ 1e-6
+                eq_model.fc2[0].weight[j, :, 0] = 0.0+ 1e-6
+
     eq_model.M = nn.Parameter(M_truth.clone())
-    W_est_truth, W2_truth, x_est_truth = model.fit(X_true, lambda1=3.5e-2, lambda2=5e-3,
+
+    # Check forward equivalence
+    with torch.no_grad():
+        X_hat = eq_model(X_truth)
+        eps = X_truth - X_hat
+        average_abs_epsilon = eps.abs().mean().item()
+        print("mean |eps|:", average_abs_epsilon)
+        Sigma_emp = (eps.T @ eps) / eps.size(0)
+        diff_emp_true_Sigma = (Sigma_emp - torch.tensor(Sigma_truth, dtype=torch.double)).clone().detach().abs().max()
+        print("‖Σ_emp − True_Sigma‖:", diff_emp_true_Sigma)
+
+    W_truth_start, observed_derivs = eq_model.get_graph(X_truth)
+    X_truth_hat_start = eq_model.forward(X_truth)
+    mle_loss_truth_start = mle_loss(X_truth_hat_start, X_truth, Sigma_truth)
+
+    W_est_truth, W2_truth, x_est_truth = model.fit(X_truth, lambda1=3.5e-2, lambda2=5e-3,
                                 lr=2e-4, mu_factor=0.1, mu_init=1, T=args.T, warm_iter=7000, max_iter=8000)
-    _, observed_derivs = eq_model.get_graph(X_true)
+    
+    _, observed_derivs = eq_model.get_graph(X_truth)
     observed_derivs_mean = observed_derivs.mean(dim = 0)
-    observed_hess_truth = eq_model.exact_hessian_diag_avg(X_true)
+    observed_hess_truth = eq_model.exact_hessian_diag_avg(X_truth)
     Sigma_est_truth = eq_model.get_Sigma()
-    mle_loss_truth = model.mle_loss(x_est_truth, X_true, Sigma_est_truth)
+    mle_loss_truth_end = model.mle_loss(x_est_truth, X_truth, Sigma_est_truth)
     h_val_truth = eq_model.h_func(W_est_truth, W2_truth)
     nonlinear_reg_truth = eq_model.get_nonlinear_reg(observed_derivs_mean, observed_hess_truth)
 
     filename = f'result_d{args.d}_seed{args.s}'
     results = {
     'admg': admg,
-    'X_true': X_true.detach().cpu().numpy().tolist(),
-    'W_true': W_true.detach().cpu().numpy().tolist(),
-    "True_Sigma": True_Sigma.tolist(),
+    'X_truth': X_truth.detach().cpu().numpy().tolist(),
+    'W_truth': W_truth.detach().cpu().numpy().tolist(),
+    'W_start': W_truth_start.detach().cpu().numpy().tolist(),
+    "Sigma_truth": Sigma_truth.tolist(),
     "fc1_weight_truth": fc1_weight_truth.detach().cpu().tolist(),
     "fc1_bias_truth": fc1_bias_truth.detach().cpu().tolist(),
     "fc2_weight_truth": fc2_weight_truth.detach().cpu().tolist(),
@@ -297,6 +377,8 @@ if __name__ == "__main__":
     "M_truth": M_truth.detach().cpu().tolist(),
     'h_val_truth': h_val_truth.item(),
     'mle_loss_truth': mle_loss_truth.detach().cpu().tolist(),
+    'mle_loss_truth_start': mle_loss_truth_start.detach().cpu().tolist(),
+    'mle_loss_truth_end': mle_loss_truth_end.detach().cpu().tolist(),
     'W_est_truth': W_est_truth.detach().cpu().tolist(),
     'Sigma_est_truth': Sigma_est_truth.detach().cpu().tolist(),
     # 'h_val_DAGMA': h_val_DAGMA.item(),
