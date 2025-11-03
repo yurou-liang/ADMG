@@ -407,10 +407,9 @@ if __name__ == "__main__":
     for i in range(n_restarts):
         print(f"\n=== Random restart {i+1}/{n_restarts} ===")
 
-        eq_model = nonlinear.DagmaMLP(
-        dims=[args.d, 10, 1], bias=True, dtype=torch.double)
-        model = nonlinear.DagmaNonlinear(
-            eq_model, dtype=torch.double, use_mse_loss=True)
+        eq_model = nonlinear_dce.DagmaMLP_DCE(
+        dims=[args.d, 10, 1], bias=True)
+        model = nonlinear_dce.DagmaDCE(eq_model, use_mle_loss=True)
         X_random_hat_start = eq_model.forward(X_truth)
         mle_loss_random_start = mle_loss(X_random_hat_start, X_truth, torch.eye(args.d))
         fc1_weight_random_start = eq_model.fc1.weight
