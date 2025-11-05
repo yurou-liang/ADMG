@@ -1,0 +1,79 @@
+^CScript started on 2025-11-03 23:25:19+01:00 [TERM="xterm-256color" TTY="/dev/pts/3" COLUMNS="-1" LINES="-1"]
+^CFatal Python error: init_import_site: Failed to import the site module
+
+Python runtime state: initialized
+
+Fatal Python error: init_import_site: Failed to import the site module
+
+Python runtime state: initialized
+
+Traceback (most recent call last):
+
+Traceback (most recent call last):
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1360[0m, in [35m_find_and_load[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1331[0m, in [35m_find_and_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m935[0m, in [35m_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1176[0m, in [35mexec_module[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1360[0m, in [35m_find_and_load[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1331[0m, in [35m_find_and_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m935[0m, in [35m_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1176[0m, in [35mexec_module[0m
+
+  File [35m"<frozen site>"[0m, line [35m73[0m, in [35m<module>[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1360[0m, in [35m_find_and_load[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1331[0m, in [35m_find_and_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m935[0m, in [35m_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1176[0m, in [35mexec_module[0m
+
+  File [35m"<frozen os>"[0m, line [35m61[0m, in [35m<module>[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1360[0m, in [35m_find_and_load[0m
+
+  File [35m"<frozen site>"[0m, line [35m73[0m, in [35m<module>[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1360[0m, in [35m_find_and_load[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1331[0m, in [35m_find_and_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m935[0m, in [35m_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1176[0m, in [35mexec_module[0m
+
+  File [35m"<frozen os>"[0m, line [35m61[0m, in [35m<module>[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1360[0m, in [35m_find_and_load[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1331[0m, in [35m_find_and_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m935[0m, in [35m_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1176[0m, in [35mexec_module[0m
+
+  File [35m"<frozen posixpath>"[0m, line [35m25[0m, in [35m<module>[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1331[0m, in [35m_find_and_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m935[0m, in [35m_load_unlocked[0m
+
+  File [35m"<frozen importlib._bootstrap>"[0m, line [35m1176[0m, in [35mexec_module[0m
+
+  File [35m"<frozen posixpath>"[0m, line [35m25[0m, in [35m<module>[0m
+
+[1;35mKeyboardInterrupt[0m
+
+[1;35mKeyboardInterrupt[0m
+
+
+Script done on 2025-11-03 23:25:19+01:00 [COMMAND_EXIT_CODE="1"]
