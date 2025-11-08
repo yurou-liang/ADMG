@@ -106,7 +106,7 @@ class DagmaNonlinear:
             X_hat = self.model(self.X)
             score = self.loss(X_hat, self.X)
             l1_reg = lambda1 * self.model.fc1_l1_reg()
-            obj = mu * (score + l1_reg) + h_val
+            obj = mu * (score + l1_reg) #+ h_val
             obj.backward()
             optimizer.step()
             if lr_decay and (i+1) % 1000 == 0:  # every 1000 iters reduce lr
