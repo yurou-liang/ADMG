@@ -90,7 +90,7 @@ class DagmaNonlinear:
 
     def minimize(self, max_iter, lr, lambda1, lambda2, mu, s,
                  lr_decay=False, checkpoint=1000, tol=1e-3, pbar=None
-                 ):
+                 ,consider_h=True):
         self.vprint(f'\nMinimize s={s} -- lr={lr}')
         optimizer = optim.Adam(self.model.parameters(
         ), lr=lr, betas=(.99, .999), weight_decay=mu*lambda2)
@@ -106,7 +106,10 @@ class DagmaNonlinear:
             X_hat = self.model(self.X)
             score = self.loss(X_hat, self.X)
             l1_reg = lambda1 * self.model.fc1_l1_reg()
-            obj = mu * (score + l1_reg) #+ h_val
+            if consider_h:
+                    obj = mu * (score + l1_reg) + h_val
+            else:
+                obj = mu * (score + l1_reg)
             obj.backward()
             optimizer.step()
             if lr_decay and (i+1) % 1000 == 0:  # every 1000 iters reduce lr
@@ -126,7 +129,7 @@ class DagmaNonlinear:
     def fit(self, X, lambda1=.02, lambda2=.005,
             T=4, mu_init=.1, mu_factor=.1, s=1.0,
             warm_iter=5e4, max_iter=8e4, lr=.0002,
-            w_threshold=0.0, checkpoint=1000
+            w_threshold=0.0, checkpoint=1000, consider_h=True
             ):
         torch.set_default_dtype(self.dtype)
         if type(X) == torch.Tensor:
@@ -155,7 +158,7 @@ class DagmaNonlinear:
                 lr_decay = False
                 while success is False:
                     success = self.minimize(inner_iter, lr, lambda1, lambda2, mu, s_cur,
-                                            lr_decay, checkpoint=checkpoint, pbar=pbar)
+                                            lr_decay, checkpoint=checkpoint, pbar=pbar, consider_h=consider_h)
                     if success is False:
                         self.model.load_state_dict(
                             model_copy.state_dict().copy())
