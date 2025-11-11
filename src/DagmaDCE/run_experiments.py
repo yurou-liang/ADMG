@@ -245,7 +245,7 @@ if __name__ == "__main__":
     epsilon = np.random.multivariate_normal([0] * args.d, Sigma_truth, size=n_samples)
     Sigma_truth = torch.tensor(Sigma_truth)
     epsilon = torch.tensor(epsilon)
-    fc1, fc2, mask = generate_layers(args.d, dims, admg, seed = 8)
+    fc1, fc2, mask = generate_layers(args.d, dims, admg, seed = 9)
     scale_weights(fc1, factor=10)
     for layer in fc2:
         scale_weights(layer, factor=15)
