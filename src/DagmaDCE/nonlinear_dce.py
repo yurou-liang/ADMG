@@ -168,8 +168,11 @@ class DagmaDCE:
 
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
+                # W2_reg = 10*lambda1 * self.model.get_W2_reg(W2)
+                corr_reg = self.model.get_corr_reg(Sigma, 3*lambda1)
 
-                obj = mu * (score + l1_reg + 10*nonlinear_reg) + h_val
+                obj = mu * (score + l1_reg + corr_reg + 10*nonlinear_reg) + h_val
+
                 # obj = mu * (score + l1_reg) + h_val
 
                 # if i % 1000 == 0:
@@ -571,3 +574,17 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         penalty = observed_derivs.abs() * gap  # [n, d, d]
 
         return penalty.sum()
+
+    def get_W2_reg(self, W2: torch.Tensor) -> torch.Tensor:
+
+        return 0.5*torch.sum(W2.abs())
+    
+    def get_corr_reg(self, Sigma: torch.Tensor, lambda_corr: float) -> torch.Tensor:
+        eps = 1e-12
+        d = Sigma.size(0)
+        Dinv = torch.diag(1.0 / torch.sqrt(torch.diag(Sigma) + eps))
+        Corr = Dinv @ Sigma @ Dinv
+        off_corr = Corr - torch.eye(d, device=Sigma.device, dtype=Sigma.dtype)
+        corr_sparsity = lambda_corr * off_corr.abs().sum()
+        return corr_sparsity
+
