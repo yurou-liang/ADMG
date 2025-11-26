@@ -169,7 +169,8 @@ class DagmaDCE:
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
                 # W2_reg = 3*lambda1 * self.model.get_W2_reg(W2)
-                corr_reg = self.model.get_W2_reg(Sigma, 8*lambda1)
+                corr_reg = self.model.get_W2_reg(W2, 8*lambda1)
+                sigma_reg = self.model.sigma_rel_reg(Sigma)
 
                 obj = mu * (score + l1_reg + corr_reg + 10*nonlinear_reg) + h_val
 
@@ -587,4 +588,14 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         off_corr = Corr - torch.eye(d, device=Sigma.device, dtype=Sigma.dtype)
         corr_sparsity = lambda_corr * off_corr.abs().sum()
         return corr_sparsity
+
+    def sigma_rel_reg(self, Sigma: torch.Tensor, lambda_diag: float = 1e-3) -> torch.Tensor:
+        """
+        Penalize relative spread of log-variances: encourages diag(Sigma)
+        to be on a similar scale across nodes, without fixing it to 1.
+        """
+        diag = torch.diag(Sigma)
+        log_diag = torch.log(diag + 1e-12)
+        mean_log = log_diag.mean().detach()
+        return lambda_diag * ((log_diag - mean_log) ** 2).sum()
 
