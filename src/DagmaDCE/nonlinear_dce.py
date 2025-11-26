@@ -575,9 +575,9 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         return penalty.sum()
 
-    def get_W2_reg(self, W2: torch.Tensor) -> torch.Tensor:
+    def get_W2_reg(self, W2: torch.Tensor, lambda_corr: float) -> torch.Tensor:
 
-        return 0.5*torch.sum(W2.abs())
+        return lambda_corr*0.5*torch.sum(W2.abs())
     
     def get_corr_reg(self, Sigma: torch.Tensor, lambda_corr: float) -> torch.Tensor:
         eps = 1e-12
