@@ -169,10 +169,11 @@ class DagmaDCE:
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
                 # W2_reg = 3*lambda1 * self.model.get_W2_reg(W2)
-                corr_reg = self.model.get_W2_reg(W2, 8*lambda1)
-                sigma_reg = self.model.sigma_rel_reg(Sigma)
+                corr_reg = self.model.get_W2_reg(W2, 10*lambda1)
+                sigma_reg = self.model.sigma_rel_reg(Sigma, lambda_diag=15*lambda1)
 
-                obj = mu * (score + l1_reg + corr_reg + 10*nonlinear_reg) + h_val
+                obj = mu * (score + l1_reg + corr_reg + 8*nonlinear_reg + sigma_reg) + h_val
+                
 
                 # obj = mu * (score + l1_reg) + h_val
 
