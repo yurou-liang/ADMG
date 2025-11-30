@@ -79,6 +79,8 @@ class DagmaDCE:
     def minimize(
         self,
         max_iter: int,
+        indi: float,
+        indi_h: float,
         lr: float,
         lambda1: float,
         lambda2: float,
@@ -88,7 +90,7 @@ class DagmaDCE:
         lr_decay: bool = False,
         checkpoint: int = 1000,
         tol: float = 1e-3,
-        freeze_Sigma: bool = False,
+        freeze_Sigma: bool = False
     ):
         """Perform minimization using the barrier method optimization
 
@@ -169,10 +171,10 @@ class DagmaDCE:
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
                 # W2_reg = 3*lambda1 * self.model.get_W2_reg(W2)
-                corr_reg = self.model.get_W2_reg(W2, 10*lambda1)
+                corr_reg = self.model.get_W2_reg(W2, 10*3.5e-2)
                 sigma_reg = self.model.sigma_rel_reg(Sigma, lambda_diag=15*lambda1)
 
-                obj = mu * (score + l1_reg + corr_reg + 8*nonlinear_reg + sigma_reg) + h_val
+                obj = mu * (score + indi*(l1_reg + corr_reg + 8*nonlinear_reg + sigma_reg)) + indi_h*h_val
                 
 
                 # obj = mu * (score + l1_reg) + h_val
@@ -257,18 +259,22 @@ class DagmaDCE:
         """
         mu = mu_init
         self.X = X
-
+        indi = 1.0
         with tqdm(total=(T - 1) * warm_iter + max_iter, disable=disable_pbar) as pbar:
             for i in range(int(T)):
                 success, s_cur = False, s
                 lr_decay = False
 
                 inner_iter = int(max_iter) if i == T - 1 else int(warm_iter)
+                indi_h =0.05 if i == T-1 else 1.0 
+                indi_i = 0.0 if i == T - 1 else indi
                 model_copy = copy.deepcopy(self.model)
                 freeze_Sigma = True if i == 0 else False
                 while success is False:
                     success = self.minimize(
                         inner_iter,
+                        indi_i,
+                        indi_h,
                         lr,
                         lambda1,
                         lambda2,
@@ -288,6 +294,7 @@ class DagmaDCE:
                             break  # lr is too small
 
                     mu *= mu_factor
+                    indi *= 0.7
 
             Sigma = self.model.get_Sigma()
             Wii = torch.diag(torch.diag(Sigma))
@@ -576,6 +583,23 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         penalty = observed_derivs.abs() * gap  # [n, d, d]
 
         return penalty.sum()
+
+    # def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-1, tau=1e-2):
+    #     # mask: where the derivative is meaningfully nonzero (edge exists)
+    #     # use J only as a mask, without gradient
+    #     J_mean = observed_derivs.abs().mean(dim=0).detach()   # [d, d]
+    #     mask = (J_mean > tau).float()                         # 1 where edge is active
+
+    #     m_t = torch.as_tensor(m, device=observed_hess.device, dtype=observed_hess.dtype)
+
+    #     # DO NOT detach H here: we want gradient to push curvature up
+    #     gap = torch.clamp_min(m_t - observed_hess.abs(), 0.0)  # [d, d]
+
+    #     # penalty: where mask=1 and curvature is too small
+    #     penalty = (mask * gap).sum()
+
+    #     return penalty
+
 
     def get_W2_reg(self, W2: torch.Tensor, lambda_corr: float) -> torch.Tensor:
 
