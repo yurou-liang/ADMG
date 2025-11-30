@@ -141,15 +141,15 @@ class DagmaDCE:
                 observed_hess = self.model.exact_hessian_diag_avg(self.X)
                 h_val = self.model.h_func(W_current, W2, s)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
-                print("Sigma: ", Sigma)
-                print("obj: ", obj)
-                print("mle loss: ", score)
-                print("h_val: ", h_val)
-                print("nonlinear_reg: ", nonlinear_reg)
-                print("observed_derivs: ", observed_derivs_mean)
-                print("observed_hess: ", observed_hess)
-                print("mu: ", mu)
-                print("W_current: ", W_current)
+                # print("Sigma: ", Sigma)
+                # print("obj: ", obj)
+                # print("mle loss: ", score)
+                # print("h_val: ", h_val)
+                # print("nonlinear_reg: ", nonlinear_reg)
+                # print("observed_derivs: ", observed_derivs_mean)
+                # print("observed_hess: ", observed_hess)
+                # print("mu: ", mu)
+                # print("W_current: ", W_current)
 
             else:
                 W_current, observed_derivs = self.model.get_graph(self.X)
@@ -179,18 +179,18 @@ class DagmaDCE:
 
                 # obj = mu * (score + l1_reg) + h_val
 
-                if i % 1000 == 0:
-                    print("Sigma: ", Sigma)
-                    print("W_current: ", W_current)
-                    print("W2: ", W2)
-                    print("obj: ", obj)
-                    print("mle loss: ", score)
-                    print("h_val: ", h_val)
-                    print("nonlinear_reg: ", nonlinear_reg)
-                    print("observed_derivs: ", observed_derivs_mean)
-                    # print("W_current.T: ", W_current.T)
-                    print("observed_hess: ", observed_hess)
-                    print("mu: ", mu)
+                # if i % 1000 == 0:
+                #     print("Sigma: ", Sigma)
+                #     print("W_current: ", W_current)
+                #     print("W2: ", W2)
+                #     print("obj: ", obj)
+                #     print("mle loss: ", score)
+                #     print("h_val: ", h_val)
+                #     print("nonlinear_reg: ", nonlinear_reg)
+                #     print("observed_derivs: ", observed_derivs_mean)
+                #     # print("W_current.T: ", W_current.T)
+                #     print("observed_hess: ", observed_hess)
+                #     print("mu: ", mu)
 
             obj.backward()
             # Clip gradients to avoid a big jump
