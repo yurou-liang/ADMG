@@ -215,10 +215,10 @@ def mle_loss(output: torch.Tensor, target: torch.Tensor, Sigma: torch.Tensor):
         mle += logdet
         return mle
 
-def reset_torch_seed(seed: int):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+# def reset_torch_seed(seed: int):
+#     torch.manual_seed(seed)
+#     if torch.cuda.is_available():
+#         torch.cuda.manual_seed_all(seed)
 
 
 
@@ -236,7 +236,7 @@ if __name__ == "__main__":
 
     print(f'>>> Generating Data with MLP <<<')
 
-    admg, A_dir, A_bidir = generate_ancestral_admg(args.d, p_dir=0.4, p_bidir=0.3, seed=args.s)
+    admg, A_dir, A_bidir = generate_ancestral_admg(args.d, p_dir=1/(args.d-1), p_bidir=1/(args.d-1), seed=args.s)
     print("admg: ", admg)
     parents = {j: admg[j]['parents'] for j in admg}
     G = nx.DiGraph()
@@ -247,14 +247,14 @@ if __name__ == "__main__":
 
     n_samples = 1000 
     dims=[args.d, 10, 1]
-    Sigma_truth = generate_covariance(A_bidir, seed=10)
+    Sigma_truth = generate_covariance(A_bidir, seed=args.s)
     epsilon = np.random.multivariate_normal([0] * args.d, Sigma_truth, size=n_samples)
     Sigma_truth = torch.tensor(Sigma_truth)
     epsilon = torch.tensor(epsilon)
-    fc1, fc2, mask = generate_layers(args.d, dims, admg, seed = 13)
+    fc1, fc2, mask = generate_layers(args.d, dims, admg, seed = 9)
     scale_weights(fc1, factor=10)
     for layer in fc2:
-        scale_weights(layer, factor=20)
+        scale_weights(layer, factor=15)
     X_truth = generate_from_epsilon(dims, epsilon, fc1, fc2, mask, parents).detach()
     X = X_truth - epsilon
 
@@ -265,91 +265,91 @@ if __name__ == "__main__":
 
     M_truth = reverse_SPDLogCholesky(Sigma_truth)
 
-    print(f'>>> DAGMA Init with h <<<')
+    # print(f'>>> DAGMA Init with h <<<')
 
-    reset_torch_seed(35)
+    # reset_torch_seed(35)
 
-    eq_model_with_h = nonlinear.DagmaMLP(
-    dims=[args.d, 10, 1], bias=True, dtype=torch.double)
-    model = nonlinear.DagmaNonlinear(
-        eq_model_with_h, dtype=torch.double, use_mse_loss=True)
+    # eq_model_with_h = nonlinear.DagmaMLP(
+    # dims=[args.d, 10, 1], bias=True, dtype=torch.double)
+    # model = nonlinear.DagmaNonlinear(
+    #     eq_model_with_h, dtype=torch.double, use_mse_loss=True)
 
-    W_est_dagma_with_h = model.fit(X_truth.clone(), lambda1=2e-2, lambda2=0.005,
-                            T=1, lr=2e-4, w_threshold=0.3, mu_init=1, warm_iter=70000, max_iter=80000, consider_h=True)
+    # W_est_dagma_with_h = model.fit(X_truth.clone(), lambda1=2e-2, lambda2=0.005,
+    #                         T=1, lr=2e-4, w_threshold=0.3, mu_init=1, warm_iter=70000, max_iter=80000, consider_h=True)
 
-    # Use DAGMA weights as initial weights for DAGMA-DCE
-    fc1_weight_DAGMA_with_h = eq_model_with_h.fc1.weight
-    fc1_bias_DAGMA_with_h = eq_model_with_h.fc1.bias
-    fc2_weight_DAGMA_with_h = eq_model_with_h.fc2[0].weight
-    fc2_bias_DAGMA_with_h= eq_model_with_h.fc2[0].bias
+    # # Use DAGMA weights as initial weights for DAGMA-DCE
+    # fc1_weight_DAGMA_with_h = eq_model_with_h.fc1.weight
+    # fc1_bias_DAGMA_with_h = eq_model_with_h.fc1.bias
+    # fc2_weight_DAGMA_with_h = eq_model_with_h.fc2[0].weight
+    # fc2_bias_DAGMA_with_h= eq_model_with_h.fc2[0].bias
 
-    eq_model_with_h = nonlinear_dce.DagmaMLP_DCE(
-        dims=[args.d, 10, 1], bias=True)
-    model = nonlinear_dce.DagmaDCE(eq_model_with_h, use_mle_loss=True)
-    eq_model_with_h.fc1.weight = fc1_weight_DAGMA_with_h
-    eq_model_with_h.fc1.bias = fc1_bias_DAGMA_with_h
-    eq_model_with_h.fc2[0].weight = fc2_weight_DAGMA_with_h
-    eq_model_with_h.fc2[0].bias = fc2_bias_DAGMA_with_h
+    # eq_model_with_h = nonlinear_dce.DagmaMLP_DCE(
+    #     dims=[args.d, 10, 1], bias=True)
+    # model = nonlinear_dce.DagmaDCE(eq_model_with_h, use_mle_loss=True)
+    # eq_model_with_h.fc1.weight = fc1_weight_DAGMA_with_h
+    # eq_model_with_h.fc1.bias = fc1_bias_DAGMA_with_h
+    # eq_model_with_h.fc2[0].weight = fc2_weight_DAGMA_with_h
+    # eq_model_with_h.fc2[0].bias = fc2_bias_DAGMA_with_h
 
-    W_est_DAGMA_with_h, W2_DAGMA_with_h, x_est_DAGMA_with_h = model.fit(X_truth.clone(), lambda1=3.5e-2, lambda2=5e-3,
-                                    lr=2e-4, mu_factor=0.1, mu_init=1, T=args.T, warm_iter=7000, max_iter=8000)
+    # W_est_DAGMA_with_h, W2_DAGMA_with_h, x_est_DAGMA_with_h = model.fit(X_truth.clone(), lambda1=3.5e-2, lambda2=5e-3,
+    #                                 lr=2e-4, mu_factor=0.1, mu_init=1, T=args.T, warm_iter=7000, max_iter=8000)
     
-    fc1_weight_DAGMA_with_h_end = eq_model_with_h.fc1.weight
-    fc1_bias_DAGMA_with_h_end = eq_model_with_h.fc1.bias
-    fc2_weight_DAGMA_with_h_end = eq_model_with_h.fc2[0].weight
-    fc2_bias_DAGMA_with_h_end = eq_model_with_h.fc2[0].bias
-    
-    	
-    _, observed_derivs = eq_model_with_h.get_graph(X_truth.clone())
-    observed_derivs_mean_with_h = observed_derivs.mean(dim = 0)
-    observed_hess_DAGMA_with_h = eq_model_with_h.exact_hessian_diag_avg(X_truth.clone())
-    Sigma_est_DAGMA_with_h = eq_model_with_h.get_Sigma()
-    mle_loss_DAGMA_with_h = model.mle_loss(x_est_DAGMA_with_h, X_truth.clone(), Sigma_est_DAGMA_with_h)
-    h_val_DAGMA_with_h = eq_model_with_h.h_func(W_est_DAGMA_with_h, W2_DAGMA_with_h)
-    nonlinear_reg_DAGMA_with_h = eq_model_with_h.get_nonlinear_reg(observed_derivs_mean_with_h, observed_hess_DAGMA_with_h)
-
-    print(f'>>> DAGMA Init without h <<<')
-
-    reset_torch_seed(35)
-
-    eq_model_without_h = nonlinear.DagmaMLP(
-    dims=[args.d, 10, 1], bias=True, dtype=torch.double)
-    model = nonlinear.DagmaNonlinear(
-        eq_model_without_h, dtype=torch.double, use_mse_loss=True)
-
-    W_est_dagma_without_h = model.fit(X_truth.clone(), lambda1=2e-2, lambda2=0.005,
-                            T=1, lr=2e-4, w_threshold=0.3, mu_init=1, warm_iter=70000, max_iter=80000, consider_h=False)
-
-    # Use DAGMA weights as initial weights for DAGMA-DCE
-    fc1_weight_DAGMA_without_h = eq_model_without_h.fc1.weight
-    fc1_bias_DAGMA_without_h = eq_model_without_h.fc1.bias
-    fc2_weight_DAGMA_without_h = eq_model_without_h.fc2[0].weight
-    fc2_bias_DAGMA_without_h= eq_model_without_h.fc2[0].bias
-
-    eq_model_without_h = nonlinear_dce.DagmaMLP_DCE(
-        dims=[args.d, 10, 1], bias=True)
-    model = nonlinear_dce.DagmaDCE(eq_model_without_h, use_mle_loss=True)
-    eq_model_without_h.fc1.weight = fc1_weight_DAGMA_without_h
-    eq_model_without_h.fc1.bias = fc1_bias_DAGMA_without_h
-    eq_model_without_h.fc2[0].weight = fc2_weight_DAGMA_without_h
-    eq_model_without_h.fc2[0].bias = fc2_bias_DAGMA_without_h
-
-    W_est_DAGMA_without_h, W2_DAGMA_without_h, x_est_DAGMA_without_h = model.fit(X_truth.clone(), lambda1=3.5e-2, lambda2=5e-3,
-                                    lr=2e-4, mu_factor=0.1, mu_init=1, T=args.T, warm_iter=7000, max_iter=8000)
-    
-    fc1_weight_DAGMA_without_h_end = eq_model_without_h.fc1.weight
-    fc1_bias_DAGMA_without_h_end = eq_model_without_h.fc1.bias
-    fc2_weight_DAGMA_without_h_end = eq_model_without_h.fc2[0].weight
-    fc2_bias_DAGMA_without_h_end = eq_model_without_h.fc2[0].bias
+    # fc1_weight_DAGMA_with_h_end = eq_model_with_h.fc1.weight
+    # fc1_bias_DAGMA_with_h_end = eq_model_with_h.fc1.bias
+    # fc2_weight_DAGMA_with_h_end = eq_model_with_h.fc2[0].weight
+    # fc2_bias_DAGMA_with_h_end = eq_model_with_h.fc2[0].bias
     
     	
-    _, observed_derivs = eq_model_without_h.get_graph(X_truth.clone())
-    observed_derivs_mean_without_h = observed_derivs.mean(dim = 0)
-    observed_hess_DAGMA_without_h = eq_model_without_h.exact_hessian_diag_avg(X_truth.clone())
-    Sigma_est_DAGMA_without_h = eq_model_without_h.get_Sigma()
-    mle_loss_DAGMA_without_h = model.mle_loss(x_est_DAGMA_without_h, X_truth.clone(), Sigma_est_DAGMA_without_h)
-    h_val_DAGMA_without_h = eq_model_without_h.h_func(W_est_DAGMA_without_h, W2_DAGMA_without_h)
-    nonlinear_reg_DAGMA_without_h = eq_model_without_h.get_nonlinear_reg(observed_derivs_mean_without_h, observed_hess_DAGMA_without_h)
+    # _, observed_derivs = eq_model_with_h.get_graph(X_truth.clone())
+    # observed_derivs_mean_with_h = observed_derivs.mean(dim = 0)
+    # observed_hess_DAGMA_with_h = eq_model_with_h.exact_hessian_diag_avg(X_truth.clone())
+    # Sigma_est_DAGMA_with_h = eq_model_with_h.get_Sigma()
+    # mle_loss_DAGMA_with_h = model.mle_loss(x_est_DAGMA_with_h, X_truth.clone(), Sigma_est_DAGMA_with_h)
+    # h_val_DAGMA_with_h = eq_model_with_h.h_func(W_est_DAGMA_with_h, W2_DAGMA_with_h)
+    # nonlinear_reg_DAGMA_with_h = eq_model_with_h.get_nonlinear_reg(observed_derivs_mean_with_h, observed_hess_DAGMA_with_h)
+
+    # print(f'>>> DAGMA Init without h <<<')
+
+    # reset_torch_seed(35)
+
+    # eq_model_without_h = nonlinear.DagmaMLP(
+    # dims=[args.d, 10, 1], bias=True, dtype=torch.double)
+    # model = nonlinear.DagmaNonlinear(
+    #     eq_model_without_h, dtype=torch.double, use_mse_loss=True)
+
+    # W_est_dagma_without_h = model.fit(X_truth.clone(), lambda1=2e-2, lambda2=0.005,
+    #                         T=1, lr=2e-4, w_threshold=0.3, mu_init=1, warm_iter=70000, max_iter=80000, consider_h=False)
+
+    # # Use DAGMA weights as initial weights for DAGMA-DCE
+    # fc1_weight_DAGMA_without_h = eq_model_without_h.fc1.weight
+    # fc1_bias_DAGMA_without_h = eq_model_without_h.fc1.bias
+    # fc2_weight_DAGMA_without_h = eq_model_without_h.fc2[0].weight
+    # fc2_bias_DAGMA_without_h= eq_model_without_h.fc2[0].bias
+
+    # eq_model_without_h = nonlinear_dce.DagmaMLP_DCE(
+    #     dims=[args.d, 10, 1], bias=True)
+    # model = nonlinear_dce.DagmaDCE(eq_model_without_h, use_mle_loss=True)
+    # eq_model_without_h.fc1.weight = fc1_weight_DAGMA_without_h
+    # eq_model_without_h.fc1.bias = fc1_bias_DAGMA_without_h
+    # eq_model_without_h.fc2[0].weight = fc2_weight_DAGMA_without_h
+    # eq_model_without_h.fc2[0].bias = fc2_bias_DAGMA_without_h
+
+    # W_est_DAGMA_without_h, W2_DAGMA_without_h, x_est_DAGMA_without_h = model.fit(X_truth.clone(), lambda1=3.5e-2, lambda2=5e-3,
+    #                                 lr=2e-4, mu_factor=0.1, mu_init=1, T=args.T, warm_iter=7000, max_iter=8000)
+    
+    # fc1_weight_DAGMA_without_h_end = eq_model_without_h.fc1.weight
+    # fc1_bias_DAGMA_without_h_end = eq_model_without_h.fc1.bias
+    # fc2_weight_DAGMA_without_h_end = eq_model_without_h.fc2[0].weight
+    # fc2_bias_DAGMA_without_h_end = eq_model_without_h.fc2[0].bias
+    
+    	
+    # _, observed_derivs = eq_model_without_h.get_graph(X_truth.clone())
+    # observed_derivs_mean_without_h = observed_derivs.mean(dim = 0)
+    # observed_hess_DAGMA_without_h = eq_model_without_h.exact_hessian_diag_avg(X_truth.clone())
+    # Sigma_est_DAGMA_without_h = eq_model_without_h.get_Sigma()
+    # mle_loss_DAGMA_without_h = model.mle_loss(x_est_DAGMA_without_h, X_truth.clone(), Sigma_est_DAGMA_without_h)
+    # h_val_DAGMA_without_h = eq_model_without_h.h_func(W_est_DAGMA_without_h, W2_DAGMA_without_h)
+    # nonlinear_reg_DAGMA_without_h = eq_model_without_h.get_nonlinear_reg(observed_derivs_mean_without_h, observed_hess_DAGMA_without_h)
     
     # print(f'>>> Truth Init <<<')
 
@@ -434,94 +434,111 @@ if __name__ == "__main__":
     # "fc2_weight_truth_end": fc2_weight_truth_end.detach().cpu().tolist(),
     # "fc2_bias_truth_end": fc2_bias_truth_end.detach().cpu().tolist(),
 
-    'mle_loss_DAGMA_with_h': mle_loss_DAGMA_with_h.detach().cpu().tolist(),
-    'W_est_DAGMA_with_h': W_est_DAGMA_with_h.detach().cpu().tolist(),
-    'Sigma_est_DAGMA_with_h': Sigma_est_DAGMA_with_h.detach().cpu().tolist(),
-    "nonlinear_reg_DAGMA_with_h": nonlinear_reg_DAGMA_with_h.detach().cpu().tolist(),
-    "fc1_weight_DAGMA_with_h_start": fc1_weight_DAGMA_with_h.detach().cpu().tolist(),
-    "fc1_bias_DAGMA_with_h_start": fc1_bias_DAGMA_with_h.detach().cpu().tolist(),
-    "fc2_weight_DAGMA_with_h_start": fc2_weight_DAGMA_with_h.detach().cpu().tolist(),
-    "fc2_bias_DAGMA_with_h_start": fc2_bias_DAGMA_with_h.detach().cpu().tolist(),
-    "fc1_weight_DAGMA_with_h_end": fc1_weight_DAGMA_with_h_end.detach().cpu().tolist(),
-    "fc1_bias_DAGMA_with_h_end": fc1_bias_DAGMA_with_h_end.detach().cpu().tolist(),
-    "fc2_weight_DAGMA_with_h_end": fc2_weight_DAGMA_with_h_end.detach().cpu().tolist(),
-    "fc2_bias_DAGMA_with_h_end": fc2_bias_DAGMA_with_h_end.detach().cpu().tolist(),
+    # 'mle_loss_DAGMA_with_h': mle_loss_DAGMA_with_h.detach().cpu().tolist(),
+    # 'W_est_DAGMA_with_h': W_est_DAGMA_with_h.detach().cpu().tolist(),
+    # 'Sigma_est_DAGMA_with_h': Sigma_est_DAGMA_with_h.detach().cpu().tolist(),
+    # "nonlinear_reg_DAGMA_with_h": nonlinear_reg_DAGMA_with_h.detach().cpu().tolist(),
+    # "fc1_weight_DAGMA_with_h_start": fc1_weight_DAGMA_with_h.detach().cpu().tolist(),
+    # "fc1_bias_DAGMA_with_h_start": fc1_bias_DAGMA_with_h.detach().cpu().tolist(),
+    # "fc2_weight_DAGMA_with_h_start": fc2_weight_DAGMA_with_h.detach().cpu().tolist(),
+    # "fc2_bias_DAGMA_with_h_start": fc2_bias_DAGMA_with_h.detach().cpu().tolist(),
+    # "fc1_weight_DAGMA_with_h_end": fc1_weight_DAGMA_with_h_end.detach().cpu().tolist(),
+    # "fc1_bias_DAGMA_with_h_end": fc1_bias_DAGMA_with_h_end.detach().cpu().tolist(),
+    # "fc2_weight_DAGMA_with_h_end": fc2_weight_DAGMA_with_h_end.detach().cpu().tolist(),
+    # "fc2_bias_DAGMA_with_h_end": fc2_bias_DAGMA_with_h_end.detach().cpu().tolist(),
 
-    'mle_loss_DAGMA_without_h': mle_loss_DAGMA_without_h.detach().cpu().tolist(),
-    'W_est_DAGMA_without_h': W_est_DAGMA_without_h.detach().cpu().tolist(),
-    'Sigma_est_DAGMA_without_h': Sigma_est_DAGMA_without_h.detach().cpu().tolist(),
-    "nonlinear_reg_DAGMA_without_h": nonlinear_reg_DAGMA_without_h.detach().cpu().tolist(),
-    "fc1_weight_DAGMA_without_h_start": fc1_weight_DAGMA_without_h.detach().cpu().tolist(),
-    "fc1_bias_DAGMA_without_h_start": fc1_bias_DAGMA_without_h.detach().cpu().tolist(),
-    "fc2_weight_DAGMA_without_h_start": fc2_weight_DAGMA_without_h.detach().cpu().tolist(),
-    "fc2_bias_DAGMA_without_h_start": fc2_bias_DAGMA_without_h.detach().cpu().tolist(),
-    "fc1_weight_DAGMA_without_h_end": fc1_weight_DAGMA_without_h_end.detach().cpu().tolist(),
-    "fc1_bias_DAGMA_without_h_end": fc1_bias_DAGMA_without_h_end.detach().cpu().tolist(),
-    "fc2_weight_DAGMA_without_h_end": fc2_weight_DAGMA_without_h_end.detach().cpu().tolist(),
-    "fc2_bias_DAGMA_without_h_end": fc2_bias_DAGMA_without_h_end.detach().cpu().tolist(),
+    # 'mle_loss_DAGMA_without_h': mle_loss_DAGMA_without_h.detach().cpu().tolist(),
+    # 'W_est_DAGMA_without_h': W_est_DAGMA_without_h.detach().cpu().tolist(),
+    # 'Sigma_est_DAGMA_without_h': Sigma_est_DAGMA_without_h.detach().cpu().tolist(),
+    # "nonlinear_reg_DAGMA_without_h": nonlinear_reg_DAGMA_without_h.detach().cpu().tolist(),
+    # "fc1_weight_DAGMA_without_h_start": fc1_weight_DAGMA_without_h.detach().cpu().tolist(),
+    # "fc1_bias_DAGMA_without_h_start": fc1_bias_DAGMA_without_h.detach().cpu().tolist(),
+    # "fc2_weight_DAGMA_without_h_start": fc2_weight_DAGMA_without_h.detach().cpu().tolist(),
+    # "fc2_bias_DAGMA_without_h_start": fc2_bias_DAGMA_without_h.detach().cpu().tolist(),
+    # "fc1_weight_DAGMA_without_h_end": fc1_weight_DAGMA_without_h_end.detach().cpu().tolist(),
+    # "fc1_bias_DAGMA_without_h_end": fc1_bias_DAGMA_without_h_end.detach().cpu().tolist(),
+    # "fc2_weight_DAGMA_without_h_end": fc2_weight_DAGMA_without_h_end.detach().cpu().tolist(),
+    # "fc2_bias_DAGMA_without_h_end": fc2_bias_DAGMA_without_h_end.detach().cpu().tolist(),
     # placeholder for all random restarts
     "random_runs": []
     }
 
-    # print(f'>>> random Init <<<')
+    print(f'>>> random Init <<<')
 
-    # n_restarts = 5
-    # best_random = None
-    # best_mle_loss = float("inf")
+    n_restarts = 5
+    best_random = None
+    best_mle_loss = float("inf")
 
-    # for i in range(n_restarts):
-    #     print(f"\n=== Random restart {i+1}/{n_restarts} ===")
+    for i in range(n_restarts):
+        print(f"\n=== Random restart {i+1}/{n_restarts} ===")
 
-    #     eq_model = nonlinear_dce.DagmaMLP_DCE(
-    #     dims=[args.d, 10, 1], bias=True)
-    #     model = nonlinear_dce.DagmaDCE(eq_model, use_mle_loss=True)
-    #     X_random_hat_start = eq_model.forward(X_truth)
-    #     mle_loss_random_start = mle_loss(X_random_hat_start, X_truth, torch.eye(args.d))
-    #     fc1_weight_random_start = eq_model.fc1.weight
-    #     fc1_bias_random_start = eq_model.fc1.bias
-    #     fc2_weight_random_start = eq_model.fc2[0].weight
-    #     fc2_bias_random_start = eq_model.fc2[0].bias
-        
-    #     W_est_random, W2_random, x_est_random = model.fit(X_truth, lambda1=3.5e-2, lambda2=5e-3,
-    #                                     lr=2e-4, mu_factor=0.1, mu_init=1, T=args.T, warm_iter=7000, max_iter=8000)
-    #     fc1_weight_random_end = eq_model.fc1.weight
-    #     fc1_bias_random_end = eq_model.fc1.bias
-    #     fc2_weight_random_end = eq_model.fc2[0].weight
-    #     fc2_bias_random_end = eq_model.fc2[0].bias
+        eq_model = nonlinear.DagmaMLP(
+        dims=[args.d, 10, 1], bias=True, dtype=torch.double)
+        model = nonlinear.DagmaNonlinear(
+            eq_model, dtype=torch.double, use_mse_loss=True)
 
-    #     _, observed_derivs = eq_model.get_graph(X_truth)
-    #     observed_derivs_mean = observed_derivs.mean(dim = 0)
-    #     observed_hess_random = eq_model.exact_hessian_diag_avg(X_truth)
-    #     Sigma_est_random = eq_model.get_Sigma()
-    #     mle_loss_random_end = model.mle_loss(x_est_random, X_truth, Sigma_est_random)
-    #     h_val_random = eq_model.h_func(W_est_random, W2_random)
-    #     nonlinear_reg_random = eq_model.get_nonlinear_reg(observed_derivs_mean, observed_hess_random)
-    #     mle_val = float(mle_loss_random_end .detach().cpu().item())
+        W_est_dagma_random = model.fit(X_truth, lambda1=2e-2, lambda2=0.005,
+                                T=1, lr=2e-4, w_threshold=0.3, mu_init=1, warm_iter=70000, max_iter=80000, consider_h=False)
 
-    #     run_result = {
-    #         "run_id": i,
-    #         "h_val_random": float(h_val_random.item()),
-    #         "mle_loss_random_start": float(mle_loss_random_start.detach().cpu().item()),
-    #         "mle_loss_random_end": float(mle_loss_random_end.detach().cpu().item()),
-    #         "W_est_random": W_est_random.detach().cpu().tolist(),
-    #         "Sigma_est_random": Sigma_est_random.detach().cpu().tolist(),
-    #         "nonlinear_reg_random": nonlinear_reg_random.detach().cpu().tolist(),
-    #         "fc1_weight_random_start": fc1_weight_random_start.detach().cpu().tolist(),
-    #         "fc1_bias_random_start": fc1_bias_random_start.detach().cpu().tolist(),
-    #         "fc2_weight_random_start": fc2_weight_random_start.detach().cpu().tolist(),
-    #         "fc2_bias_random_start": fc2_bias_random_start.detach().cpu().tolist(),
-    #         "fc1_weight_random_end": fc1_weight_random_end.detach().cpu().tolist(),
-    #         "fc1_bias_random_end": fc1_bias_random_end.detach().cpu().tolist(),
-    #         "fc2_weight_random_end": fc2_weight_random_end.detach().cpu().tolist(),
-    #         "fc2_bias_random_end": fc2_bias_random_end.detach().cpu().tolist(),
-    #     }
-    #     results["random_runs"].append(run_result)
+        # Use DAGMA weights as initial weights for DAGMA-DCE
+        fc1_weight_random = eq_model.fc1.weight
+        fc1_bias_random = eq_model.fc1.bias
+        fc2_weight_random = eq_model.fc2[0].weight
+        fc2_bias_random= eq_model.fc2[0].bias
 
-    #     if np.isfinite(mle_val) and mle_val < best_mle_loss:
-    #         best_mle_loss = mle_val
-    #         best_random = run_result
+        eq_model = nonlinear_dce.DagmaMLP_DCE(
+            dims=[args.d, 10, 1], bias=True)
+        model = nonlinear_dce.DagmaDCE(eq_model, use_mle_loss=True)
+        eq_model.fc1.weight = fc1_weight_random
+        eq_model.fc1.bias = fc1_bias_random
+        eq_model.fc2[0].weight = fc2_weight_random
+        eq_model.fc2[0].bias = fc2_bias_random
+        X_random_hat_start = eq_model.forward(X_truth)
+        mle_loss_random_start = mle_loss(X_random_hat_start, X_truth, torch.eye(args.d))
 
-    # results["best_random_run"] = best_random
+        W_est_random, W2_random, x_est_random = model.fit(X_truth, lambda1=2.5e-2, lambda2=5e-3,
+                                        lr=2e-4, mu_factor=0.1, mu_init=1, T=5, warm_iter=7000, max_iter=8000)
+            
+        fc1_weight_random_end = eq_model.fc1.weight
+        fc1_bias_random_end = eq_model.fc1.bias
+        fc2_weight_random_end = eq_model.fc2[0].weight
+        fc2_bias_random_end = eq_model.fc2[0].bias
+
+            
+        _, observed_derivs = eq_model.get_graph(X_truth)
+        observed_derivs_mean_random = observed_derivs.mean(dim = 0)
+        observed_hess_random = eq_model.exact_hessian_diag_avg(X_truth)
+        Sigma_est_random = eq_model.get_Sigma()
+        mle_loss_random_end = model.mle_loss(x_est_random, X_truth, Sigma_est_random)
+        h_val_random = eq_model.h_func(W_est_random, W2_random)
+        nonlinear_reg_random = eq_model.get_nonlinear_reg(observed_derivs_mean_random, observed_hess_random)
+        mle_val = float(mle_loss_random_end .detach().cpu().item())
+
+        run_result = {
+            "run_id": i,
+            "h_val_random": float(h_val_random.item()),
+            "mle_loss_random_start": float(mle_loss_random_start.detach().cpu().item()),
+            "mle_loss_random_end": float(mle_loss_random_end.detach().cpu().item()),
+            "W_est_random": W_est_random.detach().cpu().tolist(),
+            "Sigma_est_random": Sigma_est_random.detach().cpu().tolist(),
+            "x_est_random": x_est_random.detach().cpu().tolist(),
+            "nonlinear_reg_random": nonlinear_reg_random.detach().cpu().tolist(),
+            "fc1_weight_random_start": fc1_weight_random.detach().cpu().tolist(),
+            "fc1_bias_random_start": fc1_bias_random.detach().cpu().tolist(),
+            "fc2_weight_random_start": fc2_weight_random.detach().cpu().tolist(),
+            "fc2_bias_random_start": fc2_bias_random.detach().cpu().tolist(),
+            "fc1_weight_random_end": fc1_weight_random_end.detach().cpu().tolist(),
+            "fc1_bias_random_end": fc1_bias_random_end.detach().cpu().tolist(),
+            "fc2_weight_random_end": fc2_weight_random_end.detach().cpu().tolist(),
+            "fc2_bias_random_end": fc2_bias_random_end.detach().cpu().tolist(),
+        }
+        results["random_runs"].append(run_result)
+
+        if np.isfinite(mle_val) and mle_val < best_mle_loss:
+            best_mle_loss = mle_val
+            best_random = run_result
+
+    results["best_random_run"] = best_random
 
 
     with open(filename, 'w') as file:
