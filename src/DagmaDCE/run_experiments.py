@@ -245,13 +245,13 @@ if __name__ == "__main__":
         G.add_edges_from((p, j) for p in pa)
     order = list(nx.topological_sort(G))
 
-    n_samples = 1000 
+    n_samples = 2000 
     dims=[args.d, 10, 1]
     Sigma_truth = generate_covariance(A_bidir, seed=args.s)
     epsilon = np.random.multivariate_normal([0] * args.d, Sigma_truth, size=n_samples)
     Sigma_truth = torch.tensor(Sigma_truth)
     epsilon = torch.tensor(epsilon)
-    fc1, fc2, mask = generate_layers(args.d, dims, admg, seed = 9)
+    fc1, fc2, mask = generate_layers(args.d, dims, admg, seed = args.s)
     scale_weights(fc1, factor=10)
     for layer in fc2:
         scale_weights(layer, factor=15)
@@ -408,7 +408,7 @@ if __name__ == "__main__":
     # h_val_truth = eq_model.h_func(W_est_truth, W2_truth)
     # nonlinear_reg_truth = eq_model.get_nonlinear_reg(observed_derivs_mean, observed_hess_truth)
 
-    filename = f'result_d{args.d}_seed{args.s}_modified'
+    filename = f'result_d{args.d}_seed{args.s}_modified.json'
     results = {
     'admg': admg,
     'X_truth': X_truth.detach().cpu().numpy().tolist(),
@@ -538,11 +538,11 @@ if __name__ == "__main__":
             best_mle_loss = mle_val
             best_random = run_result
 
-    results["best_random_run"] = best_random
+        results["best_random_run"] = best_random
 
 
-    with open(filename, 'w') as file:
-        json.dump(results, file, indent=4) 
+        with open(filename, 'w') as file:
+            json.dump(results, file, indent=4) 
 
     
 
