@@ -107,28 +107,48 @@ class DagmaDCE:
             checkpoint (int, optional): how often to checkpoint. Defaults to 1000.
             tol (float, optional): tolerance to terminate learning. Defaults to 1e-3.
         """
-        optimizer = optim.Adam(
-            self.model.parameters(),
-            lr=lr,
-            betas=(0.99, 0.999),
-            weight_decay=mu * lambda2,
-        )
+        # optimizer = optim.Adam(
+        #     self.model.parameters(),
+        #     lr=lr,
+        #     betas=(0.99, 0.999),
+        #     weight_decay=mu * lambda2,
+        # )
 
+        params_f = []
+        params_sigma = []
+
+        for name, p in self.model.named_parameters():
+            if not p.requires_grad:
+                continue
+            if name == "M":
+                params_sigma.append(p)
+            else:
+                params_f.append(p)
+
+        lr_sigma = lr * 0.3  # you can try 0.1, 0.03, etc.
+        optimizer = optim.Adam(
+            [
+                {"params": params_f,     "lr": lr,        "weight_decay": mu * lambda2},
+                {"params": params_sigma, "lr": lr_sigma,  "weight_decay": mu * lambda2},
+            ],
+            betas=(0.99, 0.999),
+        )
+        
         obj_prev = 1e16
 
         scheduler = optim.lr_scheduler.ExponentialLR(
             optimizer, gamma=0.8 if lr_decay else 1.0
         )
 
-        if freeze_Sigma:
-            self.model.M.requires_grad_(False)
-        else:
-            self.model.M.requires_grad_(True)
+        # if freeze_Sigma:
+        #     self.model.M.requires_grad_(False)
+        # else:
+        #     self.model.M.requires_grad_(True)
 
         for i in range(max_iter):
             optimizer.zero_grad()
-            if i == 0:
-                self.model.M.requires_grad_(True)
+            # if i == 0:
+            #     self.model.M.requires_grad_(True)
             if i == 0:
                 X_hat = self.model(self.X)
                 Sigma = self.model.get_Sigma()
@@ -171,30 +191,31 @@ class DagmaDCE:
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
                 # W2_reg = 3*lambda1 * self.model.get_W2_reg(W2)
-                corr_reg = self.model.get_W2_reg(W2, 10*3.5e-2)
+                corr_reg = self.model.get_W2_reg(W2, 0.5*lambda1)
                 sigma_reg = self.model.sigma_rel_reg(Sigma, lambda_diag=15*lambda1)
 
-                obj = mu * (score + indi*(l1_reg + corr_reg + 8*nonlinear_reg + sigma_reg)) + indi_h*h_val
+                obj = mu * (score + indi*(l1_reg + corr_reg + 8*nonlinear_reg)) + indi_h*h_val
                 
 
                 # obj = mu * (score + l1_reg) + h_val
 
-                # if i % 1000 == 0:
-                #     print("Sigma: ", Sigma)
-                #     print("W_current: ", W_current)
-                #     print("W2: ", W2)
-                #     print("obj: ", obj)
-                #     print("mle loss: ", score)
-                #     print("h_val: ", h_val)
-                #     print("nonlinear_reg: ", nonlinear_reg)
-                #     print("observed_derivs: ", observed_derivs_mean)
-                #     # print("W_current.T: ", W_current.T)
-                #     print("observed_hess: ", observed_hess)
-                #     print("mu: ", mu)
+                if i % 1000 == 0:
+                    print("Sigma: ", Sigma)
+                    print("W_current: ", W_current)
+                    print("W2: ", W2)
+                    print("obj: ", obj)
+                    print("mle loss: ", score)
+                    print("h_val: ", h_val)
+                    print("nonlinear_reg: ", nonlinear_reg)
+                    print("observed_derivs: ", observed_derivs_mean)
+                    # print("W_current.T: ", W_current.T)
+                    print("observed_hess: ", observed_hess)
+                    print("mu: ", mu)
 
             obj.backward()
             # Clip gradients to avoid a big jump
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+
             optimizer.step()
 
             # Immediately check params
@@ -268,8 +289,9 @@ class DagmaDCE:
                 inner_iter = int(max_iter) if i == T - 1 else int(warm_iter)
                 indi_h =0.05 if i == T-1 else 1.0 
                 indi_i = 0.0 if i == T - 1 else indi
+
                 model_copy = copy.deepcopy(self.model)
-                freeze_Sigma = True if i == 0 else False
+                # freeze_Sigma = True if i == 0 else False
                 while success is False:
                     success = self.minimize(
                         inner_iter,
@@ -282,7 +304,7 @@ class DagmaDCE:
                         s_cur,
                         lr_decay=lr_decay,
                         pbar=pbar,
-                        freeze_Sigma=freeze_Sigma
+                        freeze_Sigma=False
                     )
 
                     if success is False:
