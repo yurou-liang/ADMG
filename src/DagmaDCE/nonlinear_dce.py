@@ -157,7 +157,7 @@ class DagmaDCE:
                 Wii = torch.diag(torch.diag(Sigma))
                 W2 = Sigma - Wii
                 W_current, observed_derivs = self.model.get_graph(self.X)
-                observed_derivs_mean = observed_derivs.mean(dim = 0)
+                observed_derivs_mean = observed_derivs.abs().mean(dim = 0)
                 observed_hess = self.model.exact_hessian_diag_avg(self.X)
                 h_val = self.model.h_func(W_current, W2, s)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
@@ -173,7 +173,7 @@ class DagmaDCE:
 
             else:
                 W_current, observed_derivs = self.model.get_graph(self.X)
-                observed_derivs_mean = observed_derivs.mean(dim = 0)
+                observed_derivs_mean = observed_derivs.abs().mean(dim = 0)
                 observed_hess = self.model.exact_hessian_diag_avg(self.X)
                 Sigma = self.model.get_Sigma()
                 ##### new test
@@ -287,8 +287,10 @@ class DagmaDCE:
                 lr_decay = False
 
                 inner_iter = int(max_iter) if i == T - 1 else int(warm_iter)
-                indi_h =0.05 if i == T-1 else 1.0 
-                indi_i = 0.0 if i == T - 1 else indi
+                # indi_h =0.05 if i == T-1 else 1.0 
+                # indi_i = 0.0 if i == T - 1 else indi
+                indi_h = 1.0
+                indi_i = 1.0
 
                 model_copy = copy.deepcopy(self.model)
                 # freeze_Sigma = True if i == 0 else False
@@ -316,7 +318,7 @@ class DagmaDCE:
                             break  # lr is too small
 
                     mu *= mu_factor
-                    indi *= 0.7
+                    # indi *= 0.7
 
             Sigma = self.model.get_Sigma()
             Wii = torch.diag(torch.diag(Sigma))
@@ -599,7 +601,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         # encourage |H| >= m where |J| is large
         # detach H so we don't backprop through second→third order
-        gap = torch.clamp_min(m_t - observed_hess.abs().detach(), 0.0)  # [d, d]
+        gap = torch.clamp_min(m_t - observed_hess.abs(), 0.0)  # [d, d]
 
         # broadcast over batch n; penalty per (sample, j, k)
         penalty = observed_derivs.abs() * gap  # [n, d, d]
