@@ -372,6 +372,7 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
     def __init__(
         self,
         dims: typing.List[int],
+        diag0=None,
         bias: bool = True,
         dtype: torch.dtype = torch.double,
     ):
@@ -391,6 +392,10 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         self.dims, self.d = dims, dims[0]
         self.I = torch.eye(self.d)
+
+        if diag0 is None:
+            diag0 = torch.ones(self.d, dtype=dtype)  
+        self.register_buffer("sigma_diag_target", diag0)
 
         Sigma = torch.eye(self.d, dtype=dtype)
         self.M = reverse_SPDLogCholesky(Sigma)
@@ -465,7 +470,12 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
     
     def get_Sigma(self)-> torch.Tensor:
 
-        Sigma = SPDLogCholesky(self.M)
+        Sigma0 = SPDLogCholesky(self.M)
+        eps = 1e-12
+        diag_current = torch.diag(Sigma0)
+        scale = torch.sqrt(self.sigma_diag_target / (diag_current + eps))
+        D = torch.diag(scale)
+        Sigma = D @ Sigma0 @ D
         return Sigma
 
     def get_graph(self, x: torch.Tensor) -> torch.Tensor:
