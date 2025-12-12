@@ -468,15 +468,36 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         return x
     
-    def get_Sigma(self)-> torch.Tensor:
+    # freeze diagonal
+    # def get_Sigma(self)-> torch.Tensor:
 
-        Sigma0 = SPDLogCholesky(self.M)
+    #     Sigma0 = SPDLogCholesky(self.M)
+    #     eps = 1e-12
+    #     diag_current = torch.diag(Sigma0)
+    #     scale = torch.sqrt(self.sigma_diag_target / (diag_current + eps))
+    #     D = torch.diag(scale)
+    #     Sigma = D @ Sigma0 @ D
+    #     return Sigma
+    
+    # make diagonal hard to move
+    def get_Sigma(self, gamma=0.5):     # γ in [0, 1]
+        """
+        gamma = 0 → free variances
+        gamma = 1 → variances fixed to diag0
+        """
+        Sigma0 = SPDLogCholesky(self.M)     # [d, d], SPD
+
         eps = 1e-12
-        diag_current = torch.diag(Sigma0)
-        scale = torch.sqrt(self.sigma_diag_target / (diag_current + eps))
+        diag_current = torch.diag(Sigma0)   # [d]
+
+        # compute scaling coefficients
+        scale = (self.sigma_diag_target / (diag_current + eps)).pow(0.5 * gamma)
         D = torch.diag(scale)
+
+        # congruence transform
         Sigma = D @ Sigma0 @ D
         return Sigma
+
 
     def get_graph(self, x: torch.Tensor) -> torch.Tensor:
         """Get the adjacency matrix defined by the DCE and the batched Jacobian
