@@ -83,6 +83,8 @@ class DagmaDCE:
         indi_h: float,
         lr: float,
         lambda1: float,
+        lambda_corr: float,
+        lambda_nl: float,
         lambda2: float,
         mu: float,
         s: float,
@@ -191,10 +193,10 @@ class DagmaDCE:
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
                 # W2_reg = 3*lambda1 * self.model.get_W2_reg(W2)
-                corr_reg = self.model.get_W2_reg(W2, 0.5*lambda1)
+                corr_reg = self.model.get_W2_reg(W2, lambda_corr)
                 sigma_reg = self.model.sigma_rel_reg(Sigma, lambda_diag=15*lambda1)
 
-                obj = mu * (score + indi*(l1_reg + corr_reg + 8*nonlinear_reg)) + indi_h*h_val
+                obj = mu * (score + indi*(l1_reg + corr_reg + lambda_nl*nonlinear_reg)) + indi_h*h_val
                 
 
                 # obj = mu * (score + l1_reg) + h_val
@@ -250,6 +252,8 @@ class DagmaDCE:
         self,
         X: torch.Tensor,
         lambda1: float = 0.02,
+        lambda_corr: float = 0.02,
+        lambda_nl: float = 8.0,
         lambda2: float = 0.005,
         T: int = 4,
         mu_init: float = 1.0,
@@ -301,6 +305,8 @@ class DagmaDCE:
                         indi_h,
                         lr,
                         lambda1,
+                        lambda_corr,
+                        lambda_nl,
                         lambda2,
                         mu,
                         s_cur,
