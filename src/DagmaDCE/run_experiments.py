@@ -22,11 +22,10 @@ def generate_ancestral_admg(d, p_dir=0.4, p_bidir=0.3, seed=None):
     A_bidir: bidirected adjacency matrix
     """
     if seed is not None:
-        np.random.seed(seed)
-        random.seed(seed)
+        rng = np.random.RandomState(seed)
 
     # --- Step 1: generate a DAG (acyclic directed structure)
-    A_dir = np.triu((np.random.rand(d, d) < p_dir).astype(int), 1) # generate random 0/1 matrix with edge prob p_dir, keep only upper triangular part for acyclicty
+    A_dir = np.triu((rng.random((d, d)) < p_dir).astype(int), 1) # generate random 0/1 matrix with edge prob p_dir, keep only upper triangular part for acyclicty
     dag = {j: list(np.where(A_dir[:, j] == 1)[0]) for j in range(d)} # for each child j, take the indices i where A_dir[i, j] == 1 (i.e., it's parents)
 
     # --- Step 2: precompute ancestors of each node (for the ancestral constraint)
@@ -42,7 +41,7 @@ def generate_ancestral_admg(d, p_dir=0.4, p_bidir=0.3, seed=None):
     A_bidir = np.zeros((d, d), dtype=int)
     for i in range(d):
         for j in range(i + 1, d):
-            if np.random.rand() < p_bidir:
+            if rng.random() < p_bidir:
                 # Check ancestral condition: i not ancestor of j, j not ancestor of i
                 if i not in ancestors[j] and j not in ancestors[i]:
                     A_bidir[i, j] = A_bidir[j, i] = 1  # add bidirected edge
@@ -59,7 +58,8 @@ def generate_ancestral_admg(d, p_dir=0.4, p_bidir=0.3, seed=None):
 
 def generate_layers(d, dims, admg, seed=None):
     if seed is not None:
-        torch.manual_seed(seed)
+        g = torch.Generator()
+        g.manual_seed(seed)
     bias=True
     fc1 = nn.Linear(d, d * dims[1], bias=bias) # [d * dims[1], d]
     # self.fc1.weight.bounds = self._bounds()
@@ -118,7 +118,7 @@ def generate_covariance(A_bidir, low=0.4, high=0.8, seed=None):
     Correlations for nonzero entries are strong (0.4–0.8 by default).
     """
     if seed is not None:
-        np.random.seed(seed)
+        rng = np.random.RandomState(seed)
     d = A_bidir.shape[0]
 
     # Step 1: random strong correlations for existing edges
@@ -126,9 +126,9 @@ def generate_covariance(A_bidir, low=0.4, high=0.8, seed=None):
     for i in range(d):
         for j in range(i+1, d):
             if A_bidir[i, j]:
-                val = np.random.uniform(low, high)
+                val = rng.uniform(low, high)
                 # Randomly flip sign for variety (optional)
-                if np.random.rand() < 0.5:
+                if rng.random() < 0.5:
                     val = -val
                 R[i, j] = R[j, i] = val
 
@@ -225,18 +225,22 @@ def mle_loss(output: torch.Tensor, target: torch.Tensor, Sigma: torch.Tensor):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='Comparison between RKHADagma and NOTEARS',)
 
-    parser.add_argument('-d', '--num_nodes', dest='d', default=3, type=int)
+    parser.add_argument('-d', '--num_nodes', dest='d', default=4, type=int)
     parser.add_argument('-s', '--seed', dest='s',  default=42, type=int)
+    parser.add_argument('-a', '--admg', dest='a',  default=3, type=int)
     parser.add_argument('-T', '--num_iterations', dest='T', default=5, type=int)
-    parser.add_argument('-gamma', default=10, type=int)
+    parser.add_argument('-lambda1', default=0.001, type=float)
+    parser.add_argument('-lambda_corr', default=0.1, type=float)
+    parser.add_argument('-lambda_nl', default=8.0, type=float)
 
     args = parser.parse_args()
     torch.set_default_dtype(torch.double)
     np.random.seed(args.s)
+    torch.manual_seed(args.s)
 
     print(f'>>> Generating Data with MLP <<<')
 
-    admg, A_dir, A_bidir = generate_ancestral_admg(args.d, p_dir=1/(args.d-1), p_bidir=1/(args.d-1), seed=args.s)
+    admg, A_dir, A_bidir = generate_ancestral_admg(args.d, p_dir=1/(args.d-1), p_bidir=1/(args.d-1), seed=args.a)
     print("admg: ", admg)
     parents = {j: admg[j]['parents'] for j in admg}
     G = nx.DiGraph()
@@ -260,6 +264,7 @@ if __name__ == "__main__":
 
     J = vmap(jacrev(f))(X_truth)    # shape [n_samples, d, d]
     W_truth = torch.sqrt(torch.mean(J ** 2, axis=0).T)
+    print("W_truth: ", W_truth)
     
     mle_loss_truth = mle_loss(X, X_truth, Sigma_truth)
 
@@ -408,9 +413,12 @@ if __name__ == "__main__":
     # h_val_truth = eq_model.h_func(W_est_truth, W2_truth)
     # nonlinear_reg_truth = eq_model.get_nonlinear_reg(observed_derivs_mean, observed_hess_truth)
 
-    filename = f'result_d{args.d}_seed{args.s}_modified.json'
+    filename = f'result_d{args.d}_admg{args.a}_seed{args.s}_lambda{args.lambda1}_lambda_corr{args.lambda_corr}_lambda_nl{args.lambda_nl}.json'
     results = {
     'admg': admg,
+    'lambda1': args.lambda1,
+    'lambda_corr': args.lambda_corr,
+    'lambda_nl': args.lambda_nl,
     'X_truth': X_truth.detach().cpu().numpy().tolist(),
     'X': X.detach().cpu().numpy().tolist(),
     'epsilon': epsilon.detach().cpu().numpy().tolist(),
@@ -465,7 +473,7 @@ if __name__ == "__main__":
 
     print(f'>>> random Init <<<')
 
-    n_restarts = 5
+    n_restarts = 1
     best_random = None
     best_mle_loss = float("inf")
 
@@ -496,7 +504,7 @@ if __name__ == "__main__":
         X_random_hat_start = eq_model.forward(X_truth)
         mle_loss_random_start = mle_loss(X_random_hat_start, X_truth, torch.eye(args.d))
 
-        W_est_random, W2_random, x_est_random = model.fit(X_truth, lambda1=2.5e-2, lambda2=5e-3,
+        W_est_random, W2_random, x_est_random = model.fit(X_truth, lambda1=args.lambda1, lambda_corr=args.lambda_corr, lambda_nl=args.lambda_nl, lambda2=5e-3,
                                         lr=2e-4, mu_factor=0.1, mu_init=1, T=5, warm_iter=7000, max_iter=8000)
             
         fc1_weight_random_end = eq_model.fc1.weight
@@ -534,11 +542,11 @@ if __name__ == "__main__":
         }
         results["random_runs"].append(run_result)
 
-        if np.isfinite(mle_val) and mle_val < best_mle_loss:
-            best_mle_loss = mle_val
-            best_random = run_result
+        # if np.isfinite(mle_val) and mle_val < best_mle_loss:
+        #     best_mle_loss = mle_val
+        #     best_random = run_result
 
-        results["best_random_run"] = best_random
+        # results["best_random_run"] = best_random
 
 
         with open(filename, 'w') as file:
