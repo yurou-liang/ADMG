@@ -22,11 +22,10 @@ def generate_ancestral_admg(d, p_dir=0.4, p_bidir=0.3, seed=None):
     A_bidir: bidirected adjacency matrix
     """
     if seed is not None:
-        np.random.seed(seed)
-        random.seed(seed)
+        rng = np.random.RandomState(seed)
 
     # --- Step 1: generate a DAG (acyclic directed structure)
-    A_dir = np.triu((np.random.rand(d, d) < p_dir).astype(int), 1) # generate random 0/1 matrix with edge prob p_dir, keep only upper triangular part for acyclicty
+    A_dir = np.triu((rng.random((d, d)) < p_dir).astype(int), 1) # generate random 0/1 matrix with edge prob p_dir, keep only upper triangular part for acyclicty
     dag = {j: list(np.where(A_dir[:, j] == 1)[0]) for j in range(d)} # for each child j, take the indices i where A_dir[i, j] == 1 (i.e., it's parents)
 
     # --- Step 2: precompute ancestors of each node (for the ancestral constraint)
@@ -42,7 +41,7 @@ def generate_ancestral_admg(d, p_dir=0.4, p_bidir=0.3, seed=None):
     A_bidir = np.zeros((d, d), dtype=int)
     for i in range(d):
         for j in range(i + 1, d):
-            if np.random.rand() < p_bidir:
+            if rng.random() < p_bidir:
                 # Check ancestral condition: i not ancestor of j, j not ancestor of i
                 if i not in ancestors[j] and j not in ancestors[i]:
                     A_bidir[i, j] = A_bidir[j, i] = 1  # add bidirected edge
@@ -59,10 +58,10 @@ def generate_ancestral_admg(d, p_dir=0.4, p_bidir=0.3, seed=None):
 
 def generate_layers(d, dims, admg, seed=None):
     if seed is not None:
-        torch.manual_seed(seed)
+        g = torch.Generator()
+        g.manual_seed(seed)
     bias=True
     fc1 = nn.Linear(d, d * dims[1], bias=bias) # [d * dims[1], d]
-    # self.fc1.weight.bounds = self._bounds()
     mask = torch.ones(d * dims[1], d)
 
     for j in range(d):
@@ -118,7 +117,7 @@ def generate_covariance(A_bidir, low=0.4, high=0.8, seed=None):
     Correlations for nonzero entries are strong (0.4–0.8 by default).
     """
     if seed is not None:
-        np.random.seed(seed)
+        rng = np.random.RandomState(seed)
     d = A_bidir.shape[0]
 
     # Step 1: random strong correlations for existing edges
@@ -126,9 +125,9 @@ def generate_covariance(A_bidir, low=0.4, high=0.8, seed=None):
     for i in range(d):
         for j in range(i+1, d):
             if A_bidir[i, j]:
-                val = np.random.uniform(low, high)
+                val = rng.uniform(low, high)
                 # Randomly flip sign for variety (optional)
-                if np.random.rand() < 0.5:
+                if rng.random() < 0.5:
                     val = -val
                 R[i, j] = R[j, i] = val
 
