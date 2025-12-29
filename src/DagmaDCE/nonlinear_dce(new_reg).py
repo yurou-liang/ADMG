@@ -83,9 +83,9 @@ class DagmaDCE:
         indi_h: float,
         lr: float,
         lambda1: float,
-        lambda2: float,
         lambda_corr: float,
         lambda_nl: float,
+        lambda2: float,
         mu: float,
         s: float,
         pbar: tqdm,
@@ -159,7 +159,7 @@ class DagmaDCE:
                 Wii = torch.diag(torch.diag(Sigma))
                 W2 = Sigma - Wii
                 W_current, observed_derivs = self.model.get_graph(self.X)
-                observed_derivs_mean = observed_derivs.mean(dim = 0)
+                observed_derivs_mean = observed_derivs.abs().mean(dim = 0)
                 observed_hess = self.model.exact_hessian_diag_avg(self.X)
                 h_val = self.model.h_func(W_current, W2, s)
                 nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
@@ -175,8 +175,9 @@ class DagmaDCE:
 
             else:
                 W_current, observed_derivs = self.model.get_graph(self.X)
-                observed_derivs_mean = observed_derivs.mean(dim = 0)
-                observed_hess = self.model.exact_hessian_diag_avg(self.X)
+                observed_derivs_mean = observed_derivs.abs().mean(dim = 0)
+                # observed_hess = self.model.exact_hessian_diag_avg(self.X)
+                observed_hess = self.model.exact_hessian_diag_per_sample(self.X)
                 Sigma = self.model.get_Sigma()
                 ##### new test
                 # Sigma = torch.eye(self.X.shape[1])
@@ -191,7 +192,8 @@ class DagmaDCE:
                 score = self.loss(X_hat, self.X, Sigma)
 
                 l1_reg = lambda1 * self.model.get_l1_reg(observed_derivs)
-                nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
+                # nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs_mean, observed_hess)
+                nonlinear_reg = self.model.get_nonlinear_reg(observed_derivs, observed_hess)
                 # W2_reg = 3*lambda1 * self.model.get_W2_reg(W2)
                 corr_reg = self.model.get_W2_reg(W2, lambda_corr)
                 sigma_reg = self.model.sigma_rel_reg(Sigma, lambda_diag=15*lambda1)
@@ -251,10 +253,10 @@ class DagmaDCE:
     def fit(
         self,
         X: torch.Tensor,
-        lambda1: float = 2.5e-2,
-        lambda2: float = 0.005,
-        lambda_corr: float = 2.5e-2,
+        lambda1: float = 0.02,
+        lambda_corr: float = 0.02,
         lambda_nl: float = 8.0,
+        lambda2: float = 0.005,
         T: int = 4,
         mu_init: float = 1.0,
         mu_factor: float = 0.1,
@@ -293,8 +295,8 @@ class DagmaDCE:
                 inner_iter = int(max_iter) if i == T - 1 else int(warm_iter)
                 # indi_h =0.05 if i == T-1 else 1.0 
                 # indi_i = 0.0 if i == T - 1 else indi
-                indi_h = 1
-                indi_i = 1
+                indi_h = 1.0
+                indi_i = 1.0
 
                 model_copy = copy.deepcopy(self.model)
                 # freeze_Sigma = True if i == 0 else False
@@ -305,9 +307,9 @@ class DagmaDCE:
                         indi_h,
                         lr,
                         lambda1,
-                        lambda2,
                         lambda_corr,
                         lambda_nl,
+                        lambda2,
                         mu,
                         s_cur,
                         lr_decay=lr_decay,
@@ -541,6 +543,40 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
                 total += Hdiag.size(0)
 
         return out / total  # [d, d]
+    
+    def exact_hessian_diag_per_sample(self, x: torch.Tensor, batch_size: int = 256) -> torch.Tensor:
+        """
+        Exact per-output Hessian diagonals per sample.
+        f: [B, d] -> [B, d]
+        x: [n, d]
+        returns: [n, d, d] where out[t, k, i] = ∂^2 f_k(x_t) / ∂x_i^2
+        """
+        device = x.device
+        n, d = x.shape
+        out = torch.empty(n, d, d, device=device, dtype=x.dtype)
+        def f_single(x1):  # x1: [d] -> [d]
+            return self.forward(x1.unsqueeze(0)).squeeze(0)
+        # scalarization: s(x; u) = <u, f(x)>, u = e_k gives Hessian of f_k wrt x
+        def s(x1, u1):
+            return (f_single(x1) * u1).sum()
+
+        hess_x = torch.func.hessian(s, argnums=0)  # (x1, u1) -> [d, d]
+        I = torch.eye(d, device=device, dtype=x.dtype)
+
+        def hess_all_outputs_for_sample(xi):
+            # returns [d(outputs), d, d]
+            return torch.func.vmap(lambda u: hess_x(xi, u), in_dims=0)(I)
+
+        # NOTE: don't wrap in torch.no_grad(); torch.func.hessian needs AD enabled
+        for start in range(0, n, batch_size):
+            xb = x[start:start + batch_size].detach().to(device)  # [B, d]
+            # [B, d, d, d]
+            H = torch.func.vmap(hess_all_outputs_for_sample, in_dims=0)(xb)
+            # diagonal over last two dims -> [B, d, d]
+            Hdiag = torch.diagonal(H, dim1=-2, dim2=-1).contiguous()
+            out[start:start + Hdiag.size(0)] = Hdiag
+
+        return out
 
     def cycle_loss(self, W1: torch.Tensor, s: float = 1.0) -> torch.Tensor:
         """Calculate the DAGMA constraint function
@@ -601,34 +637,36 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         """
         return torch.sum(torch.abs(torch.mean(observed_derivs, axis=0)))
     
-    def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-1):
-        # constants on the right device/dtype
-        m_t = torch.as_tensor(m, device=observed_hess.device, dtype=observed_hess.dtype)
-
-        # encourage |H| >= m where |J| is large
-        # detach H so we don't backprop through second→third order
-        gap = torch.clamp_min(m_t - observed_hess.abs().detach(), 0.0)  # [d, d]
-
-        # broadcast over batch n; penalty per (sample, j, k)
-        penalty = observed_derivs.abs() * gap  # [n, d, d]
-
-        return penalty.sum()
-
-    # def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-1, tau=1e-2):
-    #     # mask: where the derivative is meaningfully nonzero (edge exists)
-    #     # use J only as a mask, without gradient
-    #     J_mean = observed_derivs.abs().mean(dim=0).detach()   # [d, d]
-    #     mask = (J_mean > tau).float()                         # 1 where edge is active
-
+    # def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-1):
+    #     # constants on the right device/dtype
     #     m_t = torch.as_tensor(m, device=observed_hess.device, dtype=observed_hess.dtype)
 
-    #     # DO NOT detach H here: we want gradient to push curvature up
+    #     # encourage |H| >= m where |J| is large
+    #     # detach H so we don't backprop through second→third order
     #     gap = torch.clamp_min(m_t - observed_hess.abs(), 0.0)  # [d, d]
 
-    #     # penalty: where mask=1 and curvature is too small
-    #     penalty = (mask * gap).sum()
+    #     # broadcast over batch n; penalty per (sample, j, k)
+    #     penalty = observed_derivs.abs() * gap  # [n, d, d]
 
-    #     return penalty
+    #     return penalty.sum()
+
+    def get_nonlinear_reg(self, observed_derivs, observed_hess, m=1e-1):
+        """
+        observed_derivs: [n, d, d]   # per-sample Jacobian
+        observed_hess:   [n, d, d]   # per-sample (diagonal) Hessian
+        """
+        m_t = torch.as_tensor(
+            m, device=observed_hess.device, dtype=observed_hess.dtype
+        )
+
+        # per-sample hinge on curvature
+        gap = torch.clamp_min(m_t - observed_hess.abs(), 0.0)  # [n, d, d]
+
+        # per-sample penalty
+        penalty = observed_derivs.abs() * gap  # [n, d, d]
+
+        # average over samples (or sum, depending on scaling)
+        return penalty.mean()   # or .sum()
 
 
     def get_W2_reg(self, W2: torch.Tensor, lambda_corr: float) -> torch.Tensor:
