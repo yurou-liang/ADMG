@@ -485,6 +485,24 @@ if __name__ == "__main__":
         model = nonlinear.DagmaNonlinear(
             eq_model, dtype=torch.double, use_mse_loss=True)
 
+        W_est_dagma_with_h, X_est = model.fit(X_truth, lambda1=2e-2, lambda2=0.005,
+                                T=5, lr=2e-4, w_threshold=0.3, mu_init=1, warm_iter=70000, max_iter=80000, consider_h=True)
+
+        
+        E = X_truth - X_est
+        E_centered = E - E.mean(dim=0, keepdim=True)
+        var_mle = (E_centered ** 2).mean(dim=0)
+        var_max = var_mle.max()
+        var_mle_const = var_max.repeat(var_mle.shape[0])
+
+        # ✅ detach + clone for safety (important for deepcopy)
+        var_mle_const = var_mle_const.detach().clone()
+
+        eq_model = nonlinear.DagmaMLP(
+        dims=[args.d, 10, 1], bias=True, dtype=torch.double)
+        model = nonlinear.DagmaNonlinear(
+            eq_model, dtype=torch.double, use_mse_loss=True)
+
         W_est_dagma_random = model.fit(X_truth, lambda1=2e-2, lambda2=0.005,
                                 T=1, lr=2e-4, w_threshold=0.3, mu_init=1, warm_iter=70000, max_iter=80000, consider_h=False)
 
@@ -495,7 +513,7 @@ if __name__ == "__main__":
         fc2_bias_random= eq_model.fc2[0].bias
 
         eq_model = nonlinear_dce.DagmaMLP_DCE(
-            dims=[args.d, 10, 1], bias=True)
+            dims=[args.d, 10, 1], diag0= var_mle_const, bias=True)
         model = nonlinear_dce.DagmaDCE(eq_model, use_mle_loss=True)
         eq_model.fc1.weight = fc1_weight_random
         eq_model.fc1.bias = fc1_bias_random
@@ -525,6 +543,7 @@ if __name__ == "__main__":
         run_result = {
             "run_id": i,
             "h_val_random": float(h_val_random.item()),
+            "var_mle_const": var_mle_const.detach().cpu().tolist(),
             "mle_loss_random_start": float(mle_loss_random_start.detach().cpu().item()),
             "mle_loss_random_end": float(mle_loss_random_end.detach().cpu().item()),
             "W_est_random": W_est_random.detach().cpu().tolist(),
