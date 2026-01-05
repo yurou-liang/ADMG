@@ -1,0 +1,6 @@
+[submodule "external/diff-discovery"]
+	path = external/diff-discovery
+	url = https://gitlab.com/rbhatta8/dcd.git
+[submodule "external/causica"]
+	path = external/causica
+	url = https://github.com/causica/causica.git
