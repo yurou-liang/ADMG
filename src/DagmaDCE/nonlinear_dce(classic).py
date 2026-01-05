@@ -1,3 +1,6 @@
+# Modified from https://github.com/kevinsbello/dagma/blob/main/src/dagma/nonlinear.py
+# Modifications Copyright (C) 2023 Dan Waxman
+
 import copy
 import torch
 import torch.nn as nn
@@ -375,7 +378,6 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
     def __init__(
         self,
         dims: typing.List[int],
-        diag0=None,
         bias: bool = True,
         dtype: torch.dtype = torch.double,
     ):
@@ -395,10 +397,6 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         self.dims, self.d = dims, dims[0]
         self.I = torch.eye(self.d)
-
-        if diag0 is None:
-            diag0 = torch.ones(self.d, dtype=dtype)  
-        self.register_buffer("sigma_diag_target", diag0)
 
         Sigma = torch.eye(self.d, dtype=dtype)
         self.M = reverse_SPDLogCholesky(Sigma)
@@ -471,36 +469,10 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
 
         return x
     
-    # freeze diagonal
-    # def get_Sigma(self)-> torch.Tensor:
+    def get_Sigma(self)-> torch.Tensor:
 
-    #     Sigma0 = SPDLogCholesky(self.M)
-    #     eps = 1e-12
-    #     diag_current = torch.diag(Sigma0)
-    #     scale = torch.sqrt(self.sigma_diag_target / (diag_current + eps))
-    #     D = torch.diag(scale)
-    #     Sigma = D @ Sigma0 @ D
-    #     return Sigma
-    
-    # make diagonal hard to move
-    def get_Sigma(self, gamma=0.5):     # γ in [0, 1]
-        """
-        gamma = 0 → free variances
-        gamma = 1 → variances fixed to diag0
-        """
-        Sigma0 = SPDLogCholesky(self.M)     # [d, d], SPD
-
-        eps = 1e-12
-        diag_current = torch.diag(Sigma0)   # [d]
-
-        # compute scaling coefficients
-        scale = (self.sigma_diag_target / (diag_current + eps)).pow(0.5 * gamma)
-        D = torch.diag(scale)
-
-        # congruence transform
-        Sigma = D @ Sigma0 @ D
+        Sigma = SPDLogCholesky(self.M)
         return Sigma
-
 
     def get_graph(self, x: torch.Tensor) -> torch.Tensor:
         """Get the adjacency matrix defined by the DCE and the batched Jacobian
@@ -681,3 +653,4 @@ class DagmaMLP_DCE(Dagma_DCE_Module):
         log_diag = torch.log(diag + 1e-12)
         mean_log = log_diag.mean().detach()
         return lambda_diag * ((log_diag - mean_log) ** 2).sum()
+
