@@ -1,0 +1,8 @@
+{
+  "dataset_name": "my_dataset",
+  "dataset_type": "csv",
+  "train_data": "train.csv",
+  "val_data": null,
+  "test_data": null,
+  "normalize": true
+}
