@@ -441,10 +441,29 @@ class DECI(
                 assert samples == 1, "When passing most_likely_graph, only 1 sample can be returned."
                 A_samples = [self.var_dist_A.get_adj_matrix(do_round=do_round)]
             else:
-                A_samples = [self.var_dist_A.sample_A() for _ in range(samples)]
+                A_samples = []
+                for t in range(samples):
+                    A = self.var_dist_A.sample_A()
+                    print(
+                        "[DEBUG][get_adj_matrix_tensor] got A from sample_A",
+                        "t=", t,
+                        "finite=", bool(torch.isfinite(A).all()),
+                        "id(var_dist_A)=", id(self.var_dist_A),
+                    )
+
+                    if not torch.isfinite(A).all():
+                        idx = torch.nonzero(~torch.isfinite(A), as_tuple=False)[:10].detach().cpu().tolist()
+                        print("[DEBUG][get_adj_matrix_tensor] NON-FINITE A idx:", idx)
+                        i, j = idx[0]
+                        print("[DEBUG] A[i,j] =", A[i, j].item())
+                        raise RuntimeError("non-finite A returned by sample_A")
+
+                    A_samples.append(A)
+
                 if do_round:
                     A_samples = [A.round() for A in A_samples]
-            adj = torch.stack(A_samples, dim=0)
+
+                adj = torch.stack(A_samples, dim=0)
         elif self.mode_adjacency == "upper":
             adj = (
                 torch.triu(torch.ones(self.num_nodes, self.num_nodes), diagonal=1)
