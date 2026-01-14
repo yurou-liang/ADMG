@@ -85,87 +85,64 @@ class VarDistA(AdjMatrix, nn.Module):
 
     def sample_A(self) -> torch.Tensor:
         """
-        Sample an adjacency matrix from the variational distribution. It uses the gumbel_softmax trick,
-        and returns hard samples (straight through gradient estimator). Adjacency returned always has
-        zeros in its diagonal (no self loops).
-
-        V1: Returns one sample to be used for the whole batch.
+        Sample an adjacency matrix from the variational distribution via gumbel_softmax.
+        Returns hard samples (straight-through). Diagonal forced to 0.
         """
-        logits = self._get_logits_softmax()
-        ######################################################
-        def _finite_minmax(t: torch.Tensor):
-            fin = t[torch.isfinite(t)]
-            if fin.numel() == 0:
-                return (None, None)
-            return (fin.min().item(), fin.max().item())
-
-        logits = self._get_logits_softmax()
-
-        # --- DEBUG: check logits + tau right before gumbel_softmax ---
-        tau = self.tau_gumbel
-        # tau might be a float or tensor; normalize to python float for printing
-        tau_val = float(tau.item()) if torch.is_tensor(tau) else float(tau)
-
-        bad_logits = torch.isnan(logits).any() or torch.isinf(logits).any()
-        bad_tau = (tau_val != tau_val) or (tau_val <= 0.0) or (tau_val == float("inf")) or (tau_val == -float("inf"))
-
-        if bad_logits or bad_tau:
-            print("[DEBUG][sample_A] bad input to gumbel_softmax:",
-                "bad_logits=", bool(bad_logits),
-                "bad_tau=", bool(bad_tau),
-                "tau=", tau_val,
-                "logits shape=", tuple(logits.shape),
-                "logits finite min/max=", _finite_minmax(logits))
-
-            if bad_logits:
-                idx = torch.nonzero(torch.isnan(logits), as_tuple=False)[:20].detach().cpu().tolist()
-                print("[DEBUG][sample_A] first NaN idx in logits:", idx)
-
-            raise RuntimeError("[DEBUG] NaN/Inf in logits or invalid tau before gumbel_softmax")
-        # --- END DEBUG ---
-        ######################################################
-        sample = F.gumbel_softmax(logits, tau=self.tau_gumbel, hard=True, dim=0)  # (2, n, n) binary
-        #################################################
-        logits = self._get_logits_softmax()
-
-        def _finite_minmax(t):
-            fin = t[torch.isfinite(t)]
-            return (fin.min().item(), fin.max().item()) if fin.numel() else (None, None)
-
-        # ---- CHECK 1: logits + tau ----
+        logits = self._get_logits_softmax()  # shape (2, n, n)
         tau = self.tau_gumbel
         tau_val = float(tau.item()) if torch.is_tensor(tau) else float(tau)
 
-        if torch.isnan(logits).any() or torch.isinf(logits).any() or (not (tau_val > 0.0)):
+        # --- DEBUG: entering ---
+        print("[DEBUG][sample_A] ENTER tau=", tau_val, "logits finite=", bool(torch.isfinite(logits).all()))
+
+        # 0) sanity check logits/tau
+        if (not torch.isfinite(logits).all()) or (not (tau_val > 0.0)):
+            idx = torch.nonzero(~torch.isfinite(logits), as_tuple=False)[:20].detach().cpu().tolist()
             print("[DEBUG][sample_A] BAD logits/tau",
                 "tau=", tau_val,
                 "logits shape=", tuple(logits.shape),
-                "logits finite min/max=", _finite_minmax(logits))
-            idx = torch.nonzero(torch.isnan(logits), as_tuple=False)[:20].detach().cpu().tolist()
-            print("[DEBUG][sample_A] first NaN idx in logits:", idx)
-            # print the problematic positions you keep seeing:
-            print("[DEBUG][sample_A] logits[:,6,1] =", logits[:,6,1].detach().cpu())
-            print("[DEBUG][sample_A] logits[:,6,2] =", logits[:,6,2].detach().cpu())
-            raise RuntimeError("[DEBUG] NaN/Inf in logits or invalid tau before gumbel_softmax")
+                "first non-finite logits idx=", idx)
+            # optional: print known problematic positions
+            try:
+                print("[DEBUG][sample_A] logits[:,6,1] =", logits[:, 6, 1].detach().cpu())
+                print("[DEBUG][sample_A] logits[:,6,2] =", logits[:, 6, 2].detach().cpu())
+            except Exception:
+                pass
+            raise RuntimeError("NaN/Inf in logits or invalid tau before gumbel_softmax")
 
-        sample = F.gumbel_softmax(logits, tau=self.tau_gumbel, hard=True, dim=0)  # (2,n,n)
+        # 1) IMPORTANT: do gumbel_softmax in float64, then cast back (stabilizes rare NaNs)
+        sample = torch.nn.functional.gumbel_softmax(
+            logits.double(),
+            tau=tau_val,
+            hard=True,
+            dim=0
+        ).to(logits.dtype)  # shape (2, n, n)
 
-        # ---- CHECK 2: sample output ----
-        if torch.isnan(sample).any() or torch.isinf(sample).any():
-            print("[DEBUG][sample_A] BAD sample from gumbel_softmax",
-                "tau=", tau_val,
-                "sample finite min/max=", _finite_minmax(sample))
-            idx = torch.nonzero(torch.isnan(sample), as_tuple=False)[:20].detach().cpu().tolist()
-            print("[DEBUG][sample_A] first NaN idx in sample:", idx)
-            # again, check your known bad area
-            print("[DEBUG][sample_A] sample[:,6,1] =", sample[:,6,1].detach().cpu())
-            print("[DEBUG][sample_A] sample[:,6,2] =", sample[:,6,2].detach().cpu())
-            print("[DEBUG][sample_A] logits[:,6,1] =", logits[:,6,1].detach().cpu())
-            print("[DEBUG][sample_A] logits[:,6,2] =", logits[:,6,2].detach().cpu())
-            raise RuntimeError("[DEBUG] NaN/Inf produced by gumbel_softmax")
-        #################################################
+        # 2) check gumbel output
+        if not torch.isfinite(sample).all():
+            idx = torch.nonzero(~torch.isfinite(sample), as_tuple=False)[:10]
+            k, i, j = idx[0].tolist()
+            print("[DEBUG][sample_A] NON-FINITE right after gumbel",
+                "tau=", tau_val, "first=", (k, i, j))
+            print("[DEBUG][sample_A] logits[:,i,j] =", logits[:, i, j].detach().cpu())
+            print("[DEBUG][sample_A] sample[:,i,j] =", sample[:, i, j].detach().cpu())
+            raise RuntimeError("non-finite from gumbel_softmax")
+
+        # 3) postprocess to (n, n) and zero diagonal
         sample = sample[1, :, :]  # (n, n)
-        sample = sample * (1 - torch.eye(self.input_dim, device=self.device))  # Force zero diagonals
+        sample = sample * (1 - torch.eye(self.input_dim, device=self.device, dtype=sample.dtype))
+
+        # 4) final check
+        fin = sample[torch.isfinite(sample)]
+        mnmx = (fin.min().item(), fin.max().item()) if fin.numel() else (None, None)
+        print("[DEBUG][sample_A] RETURN finite=", bool(torch.isfinite(sample).all()), "min/max finite=", mnmx)
+
+        if not torch.isfinite(sample).all():
+            idx = torch.nonzero(~torch.isfinite(sample), as_tuple=False)[:10]
+            i, j = idx[0].tolist()
+            print("[DEBUG][sample_A] NON-FINITE before return first=", (i, j), "val=", sample[i, j].item())
+            raise RuntimeError("non-finite in sample_A after postprocess")
+
         return sample
 
     def log_prob_A(self, A: torch.Tensor) -> torch.Tensor:
