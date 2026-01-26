@@ -172,3 +172,10 @@ external/causica/causica_final/data/
 
 # force-ignore causica_final run artifacts
 /external/causica_final/runs_batch/
+
+# causica_final artifacts (do NOT commit)
+/external/causica/causica_final/mlruns/
+/external/causica/causica_final/runs/
+/external/causica/causica_final/runs_batch/
+/external/causica/causica_final/logs/
+/external/causica/causica_final/data/
