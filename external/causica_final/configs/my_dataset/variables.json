@@ -1,0 +1,24 @@
+{
+  "variables": [
+    {
+      "name": "x0",
+      "group_name": "x0",
+      "type": "continuous"
+    },
+    {
+      "name": "x1",
+      "group_name": "x1",
+      "type": "continuous"
+    },
+    {
+      "name": "x2",
+      "group_name": "x2",
+      "type": "continuous"
+    },
+    {
+      "name": "x3",
+      "group_name": "x3",
+      "type": "continuous"
+    }
+  ]
+}

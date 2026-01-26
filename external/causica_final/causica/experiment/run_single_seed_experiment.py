@@ -180,7 +180,7 @@ def run_single_seed_experiment(args: ExperimentArguments):
     # Evaluate causal discovery
     if args.latent_confounded_causal_discovery:
         assert isinstance(model, IModelForCausalInference)
-        eval_latent_confounded_causal_discovery(dataset, model)
+        eval_latent_confounded_causal_discovery(dataset, model, dataset_name=args.dataset_name)
     elif args.causal_discovery:
         assert isinstance(model, IModelForCausalInference)
         causal_model = cast(IModelForCausalInference, model)

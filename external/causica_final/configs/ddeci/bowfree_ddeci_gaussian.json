@@ -9,11 +9,7 @@
         "norm_layers": false,
         "res_connection": false,
         "random_seed": [
-            0,
-            1,
-            2,
-            3,
-            4
+            0
         ],
         "cate_rff_n_features": 3000,
         "cate_rff_lengthscale": [

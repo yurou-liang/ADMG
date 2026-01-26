@@ -10,6 +10,9 @@ import warnings
 from functools import partial
 from logging import Logger
 from typing import Any, Dict, Optional, Union, cast
+from pathlib import Path
+import json
+
 
 import mlflow
 import numpy as np
@@ -298,56 +301,93 @@ def eval_causal_discovery(dataset: CausalDataset, model: IModelForCausalInferenc
 def eval_latent_confounded_causal_discovery(
     dataset: Union[CausalDataset, LatentConfoundedCausalDataset],
     model: IModelForCausalInference,
+    dataset_name: str,
 ):
-    if isinstance(dataset, LatentConfoundedCausalDataset):
-        true_directed_adj = dataset.get_directed_adjacency_data_matrix()
-        true_bidirected_adj = dataset.get_bidirected_adjacency_data_matrix()
-    else:
-        true_directed_adj = dataset.get_adjacency_data_matrix()
-        true_bidirected_adj = np.zeros_like(true_directed_adj)
+    # if isinstance(dataset, LatentConfoundedCausalDataset):
+    #     true_directed_adj = dataset.get_directed_adjacency_data_matrix()
+    #     true_bidirected_adj = dataset.get_bidirected_adjacency_data_matrix()
+    # else:
+    #     true_directed_adj = dataset.get_adjacency_data_matrix()
+    #     true_bidirected_adj = np.zeros_like(true_directed_adj)
 
     if hasattr(model, "get_admg_matrices"):
-        directed_adj, bidirected_adj = cast(Any, model).get_admg_matrices()
-        directed_adj = directed_adj.astype(float).round()
-        bidirected_adj = bidirected_adj.astype(float).round()
+        directed_adj, bidirected_adj = cast(Any, model).get_admg_matrices(do_round=False)
+        directed_adj = directed_adj.astype(float)#.round()
+        bidirected_adj = bidirected_adj.astype(float)#.round()
     elif isinstance(model, DDECI):
         return
     else:
         assert hasattr(model, "get_adj_matrix")
-        directed_adj = model.get_adj_matrix().astype(float).round()
+        directed_adj = model.get_adj_matrix(do_round=False).astype(float)#.round()
         bidirected_adj = np.zeros_like(directed_adj)
 
     # save matrices
     np.save(os.path.join(model.save_dir, "pred_directed_adj"), directed_adj, allow_pickle=True, fix_imports=True)
     np.save(os.path.join(model.save_dir, "pred_bidirected_adj"), bidirected_adj, allow_pickle=True, fix_imports=True)
 
-    for adj_type, adj_pred, adj_ground_truth in zip(
-        ["directed", "bidirected"], [directed_adj, bidirected_adj], [true_directed_adj, true_bidirected_adj]
-    ):
-        if len(adj_pred.shape) == 2:
-            # If predicts single adjacency matrix
-            results = edge_prediction_metrics(adj_ground_truth, adj_pred, adj_matrix_mask=None)
-        elif len(adj_pred.shape) == 3:
-            # If predicts multiple adjacency matrices (stacked)
-            results = edge_prediction_metrics_multisample(adj_ground_truth, adj_pred, adj_matrix_mask=None)
+    if directed_adj.ndim == 3:
+        directed_adj_final = directed_adj.mean(axis=0)
+    else:
+        directed_adj_final = directed_adj
 
-        # Log metrics
-        mlflow.log_metric(f"{adj_type}.adjacency.recall", results["adjacency_recall"])
-        mlflow.log_metric(f"{adj_type}.adjacency.precision", results["adjacency_precision"])
-        mlflow.log_metric(f"{adj_type}.adjacency.f1", results["adjacency_fscore"], True)
-        mlflow.log_metric(f"{adj_type}.orientation.recall", results["orientation_recall"])
-        mlflow.log_metric(f"{adj_type}.orientation.precision", results["orientation_precision"])
-        mlflow.log_metric(f"{adj_type}.orientation.f1", results["orientation_fscore"], True)
-        mlflow.log_metric(f"{adj_type}.causal_accuracy", results["causal_accuracy"])
-        mlflow.log_metric(f"{adj_type}.causalshd", results["shd"])
-        mlflow.log_metric(f"{adj_type}.causalnnz", results["nnz"])
-        # Save causality results to a file
-        save_train_val_test_metrics(
-            train_metrics={},
-            val_metrics={},
-            test_metrics=results,
-            save_file=os.path.join(model.save_dir, f"target_results_causality_{adj_type}.json"),
-        )
+    if bidirected_adj.ndim == 3:
+        bidirected_adj_final = bidirected_adj.mean(axis=0)
+    else:
+        bidirected_adj_final = bidirected_adj
+
+    RESULT_ROOT = Path("~/projects/ADMG/result_d4_nonlinear").expanduser()
+    RESULT_ROOT.mkdir(parents=True, exist_ok=True)
+
+    out_path = RESULT_ROOT / f"{dataset_name}.json"
+    GT_ROOT = Path("~/projects/ADMG/result_d4").expanduser()
+    gt_path = GT_ROOT / f"{dataset_name}.json"
+    if not gt_path.exists():
+        raise FileNotFoundError(f"Ground-truth file not found: {gt_path}")
+    with open(gt_path, "r") as f:
+        gt_obj = json.load(f)
+    W_truth = gt_obj["W_truth"]
+    Sigma_truth = gt_obj["Sigma_truth"]
+    admg = gt_obj["admg"]
+
+    out = {
+    "dataset_name": dataset_name,
+    "directed_adj_final": directed_adj_final.tolist(),
+    "bidirected_adj_final": bidirected_adj_final.tolist(),
+    "W_truth": W_truth,
+    "Sigma_truth": Sigma_truth,
+    "admg": admg,
+    }
+    
+    with open(out_path, "w") as f:
+        json.dump(out, f, indent=2)
+
+    # for adj_type, adj_pred, adj_ground_truth in zip(
+    #     ["directed", "bidirected"], [directed_adj, bidirected_adj], [true_directed_adj, true_bidirected_adj]
+    # ):
+    #     if len(adj_pred.shape) == 2:
+    #         # If predicts single adjacency matrix
+    #         results = edge_prediction_metrics(adj_ground_truth, adj_pred, adj_matrix_mask=None)
+    #     elif len(adj_pred.shape) == 3:
+    #         # If predicts multiple adjacency matrices (stacked)
+    #         results = edge_prediction_metrics_multisample(adj_ground_truth, adj_pred, adj_matrix_mask=None)
+
+    #     # Log metrics
+    #     mlflow.log_metric(f"{adj_type}.adjacency.recall", results["adjacency_recall"])
+    #     mlflow.log_metric(f"{adj_type}.adjacency.precision", results["adjacency_precision"])
+    #     mlflow.log_metric(f"{adj_type}.adjacency.f1", results["adjacency_fscore"], True)
+    #     mlflow.log_metric(f"{adj_type}.orientation.recall", results["orientation_recall"])
+    #     mlflow.log_metric(f"{adj_type}.orientation.precision", results["orientation_precision"])
+    #     mlflow.log_metric(f"{adj_type}.orientation.f1", results["orientation_fscore"], True)
+    #     mlflow.log_metric(f"{adj_type}.causal_accuracy", results["causal_accuracy"])
+    #     mlflow.log_metric(f"{adj_type}.causalshd", results["shd"])
+    #     mlflow.log_metric(f"{adj_type}.causalnnz", results["nnz"])
+    #     # Save causality results to a file
+    #     save_train_val_test_metrics(
+    #         train_metrics={},
+    #         val_metrics={},
+    #         test_metrics=results,
+    #         save_file=os.path.join(model.save_dir, f"target_results_causality_{adj_type}.json"),
+    #     )
 
 
 def evaluate_treatment_effect_estimation(
