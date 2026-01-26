@@ -169,3 +169,6 @@ external/causica/causica_final/runs_batch/
 external/causica/causica_final/logs/
 external/causica/causica_final/data/
 
+
+# force-ignore causica_final run artifacts
+/external/causica_final/runs_batch/
