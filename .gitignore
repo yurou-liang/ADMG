@@ -161,3 +161,10 @@ cython_debug/
 # Ignore log files
 logs/
 *.out
+
+# Ignore experiment tracking outputs in causica_final
+external/causica/causica_final/mlruns/
+external/causica/causica_final/runs/
+external/causica/causica_final/runs_batch/
+external/causica/causica_final/logs/
+
