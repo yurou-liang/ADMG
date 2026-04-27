@@ -1,0 +1,26 @@
+name: admg
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - networkx
+  - scipy
+  - scikit-learn
+  - statsmodels
+  - matplotlib
+  - ipykernel
+  - python-igraph         # conda build of igraph (stable on Linux)
+  - pytorch=2.4.*         # CPU build from pytorch channel
+  - cpuonly
+  - pip
+  - pip:
+      - ananke-causal==0.1.5
+      - autograd==1.7.0
+      - wandb
+      - texttable
+      - setproctitle
+      - tqdm
