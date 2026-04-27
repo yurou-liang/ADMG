@@ -62,3 +62,4 @@ W_est = model.fit(X, lambda1=3.5e-2, lambda2=5e-3,
 ```
 
 For basic examples, see `tests/linear.py` and `tests/nonlinear.py`. The `tests/linear.py` script reproduces Figure 1 of the paper, and `tests/run_experiment.py` is used to reproduce the results of the paper. 
+# update
